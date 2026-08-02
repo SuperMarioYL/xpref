@@ -1,0 +1,31 @@
+{
+  "model": "Kimi K3 (Q4 sample trace, 8 of N layers, 128 tokens)",
+  "geometry": {
+    "num_experts": 896,
+    "num_active": 16,
+    "num_layers": 8,
+    "num_tokens": 128
+  },
+  "baseline": {
+    "mode": "reactive on-demand expert paging (llama.cpp kimi-k3 fork)",
+    "decode_tps": 4.0
+  },
+  "xpref": {
+    "predictor": "n-gram + top-k heuristic (v0.1, non-learned)",
+    "recall_at_16": 0.7405,
+    "projected_decode_tps": 12.0,
+    "speedup": 3.0,
+    "per_layer_recall": [
+      0.7451,
+      0.7362,
+      0.7367,
+      0.7402,
+      0.7406,
+      0.7397,
+      0.7426,
+      0.7431
+    ]
+  },
+  "note": "Reactive t/s is the observed ~4 t/s on 768 GB DDR5 + NVMe paging; xpref projected t/s models decode cost as seek-dominated with misses falling from num_active to (1-recall)*num_active, capped at the bandwidth ceiling. Real measured t/s is read off llama-cli's output after applying the bundled patch + rebuild.",
+  "generated_at": "2026-08-02T20:39:50+00:00"
+}

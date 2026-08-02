@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: xpref <xpref@users.noreply.github.com>
+Date: Mon, 3 Aug 2026 00:00:00 +0000
+Subject: [PATCH] moe: export router gating logits + fired experts to xpref ring
+
+Reference patch for the llama.cpp kimi-k3 fork. After the router computes
+its per-expert gating logits (and once the top-k routing decision is made),
+this writes one record per (token, layer) into a shared ring file that
+`xpref attach` consumes to predict and pre-stage the next-firing experts.
+
+Ring protocol (must match src/xpref/ringbuf.py):
+  header (40 bytes, little-endian):
+    magic      : 8 bytes  = "XPRFRING"
+    version    : uint32  = 1
+    num_experts: uint32  (e.g. 896 for Kimi K3)
+    num_active : uint32  (e.g. 16)
+    num_layers : uint32
+    capacity   : uint32  (ring slots, e.g. 256)
+    head       : uint64  (monotonic write counter)
+    tail       : uint64  (consumer read counter)
+  record (per token, per layer):
+    token_idx  : uint32
+    layer      : uint32
+    logits     : num_experts * float32   # router gating logits
+    fired      : num_active  * uint16     # expert ids that fired
+
+The ring file path defaults to /dev/shm/<name>.xring on Linux and
+/tmp/<name>.xring on macOS (set via the XPREF_RING env var). The producer
+writes the record body first, then bumps `head` last (release barrier).
+
+NOTE: line numbers are illustrative against a recent kimi-k3 fork; re-run
+`git apply --reject` and adapt the hunks to your checkout. The change is
+localized to the MoE routing hot path.
+
+Signed-off-by: xpref <xpref@users.noreply.github.com>
+---
+ src/llama/moe-router.cpp   | 78 ++++++++++++++++++++++++++++++++++++++
+ src/llama/moe-router.h     | 12 ++++++
+ src/llama/llama-moe-router |  2 ++
+ 3 files changed, 92 insertions(+)
+
+diff --git a/src/llama/moe-router.h b/src/llama/moe-router.h
+index 1111111..2222222 100644
+--- a/src/llama/moe-router.h
++++ b/src/llama/moe-router.h
+@@ -40,6 +40,18 @@ struct moe_router {
+     // softmax over the gating logits to pick the active experts.
+     ggml_tensor * gate_w;
+     ggml_tensor * gate_b;
++
++    // --- xpref: shared router-logit ring ---------------------------------
++    // When non-null, the router writes its per-token gating logits and the
++    // fired expert ids into this ring so an external `xpref attach` process
++    // can predict-and-pre-stage the next-firing experts. nullptr = disabled.
++    int xpref_fd;
++    void * xpref_ring;
++    uint64_t xpref_head;
++    uint32_t xpref_capacity;
++    uint32_t xpref_num_experts;
++    uint32_t xpref_num_active;
++    uint32_t xpref_num_layers;
+ };
+ #endif
+diff --git a/src/llama/moe-router.cpp b/src/llama/moe-router.cpp
+index 3333333..4444444 100644
+--- a/src/llama/moe-router.cpp
++++ b/src/llama/moe-router.cpp
+@@ -10,6 +10,72 @@
+ #include "moe-router.h"
+ #include <algorithm>
+ #include <cstring>
++#include <sys/mman.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <cstdlib>
++
++// --- xpref: open/mmap the shared ring on first use ------------------------
++static void xpref_ring_open(moe_router & r, uint32_t num_layers,
++                             uint32_t num_experts, uint32_t num_active) {
++    const char * env = std::getenv("XPREF_RING");
++    std::string name = env ? env : "xpref_router";
++    std::string path;
++#ifdef __linux__
++    path = "/dev/shm/" + name + ".xring";
++#else
++    path = "/tmp/" + name + ".xring";
++#endif
++    uint32_t capacity = 256;
++    size_t rec = 4 + 4 + num_experts * 4 + num_active * 2;  // token, layer, logits, fired
++    size_t total = 40 + (size_t)capacity * rec;             // 40-byte header
++    int fd = ::open(path.c_str(), O_RDWR, 0600);
++    if (fd < 0) {  // producer may also be the creator
++        fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
++        if (fd >= 0) ::ftruncate(fd, (off_t)total);
++    }
++    if (fd < 0) return;
++    void * mem = ::mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++    if (mem == MAP_FAILED) { ::close(fd); return; }
++    // write a header if this looks like a fresh file (magic mismatch)
++    char * p = (char*)mem;
++    if (std::memcmp(p, "XPRFRING", 8) != 0) {
++        std::memcpy(p + 0, "XPRFRING", 8);
++        uint32_t ver = 1;  std::memcpy(p + 8, &ver, 4);
++        std::memcpy(p + 12, &num_experts, 4);
++        std::memcpy(p + 16, &num_active, 4);
++        std::memcpy(p + 20, &num_layers, 4);
++        std::memcpy(p + 24, &capacity, 4);
++        uint64_t zero = 0; std::memcpy(p + 28, &zero, 8);  // head
++        std::memcpy(p + 36, &zero, 8);                      // tail
++    }
++    r.xpref_fd = fd;
++    r.xpref_ring = mem;
++    r.xpref_head = 0;
++    r.xpref_capacity = capacity;
++    r.xpref_num_experts = num_experts;
++    r.xpref_num_active = num_active;
++    r.xpref_num_layers = num_layers;
++}
++
++// xpref: append one (token, layer) record; bump head last (release barrier).
++static void xpref_ring_write(moe_router & r, uint32_t token_idx, uint32_t layer,
++                              const float * logits, const uint16_t * fired) {
++    if (!r.xpref_ring) return;
++    size_t rec = 4 + 4 + (size_t)r.xpref_num_experts * 4 + (size_t)r.xpref_num_active * 2;
++    size_t total = 40 + (size_t)r.xpref_capacity * rec;
++    uint64_t head = r.xpref_head;
++    char * base = (char*)r.xpref_ring + 40;
++    char * slot = base + (size_t)(head % r.xpref_capacity) * rec;
++    std::memcpy(slot + 0, &token_idx, 4);
++    std::memcpy(slot + 4, &layer, 4);
++    std::memcpy(slot + 8, logits, (size_t)r.xpref_num_experts * 4);
++    std::memcpy(slot + 8 + (size_t)r.xpref_num_experts * 4, fired,
++                (size_t)r.xpref_num_active * 2);
++    // release barrier: bump the monotonic head AFTER the body is visible.
++    r.xpref_head = head + 1;
++    __atomic_store_n((uint64_t*)((char*)r.xpref_ring + 28), r.xpref_head,
++                      __ATOMIC_RELEASE);
++    (void)total;
++}
+@@ -88,6 +154,12 @@ void moe_route(moe_router & r, uint32_t token_idx, uint32_t layer,
+     // ... existing routing: compute gating logits, pick top-k, fire experts ...
+     // `logits`  -> float[num_experts]   (router gating distribution)
+     // `fired`   -> uint16_t[num_active] (ids that actually fired)
++
++    // --- xpref: export logits + fired to the shared ring ------------------
++    if (!r.xpref_ring && r.xpref_num_experts == 0) {
++        xpref_ring_open(r, r.n_layers, r.n_experts, r.n_active);
++    }
++    xpref_ring_write(r, token_idx, layer, logits, fired);
+ }
+diff --git a/src/llama/llama-moe-router b/src/llama/llama-moe-router
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/src/llama/llama-moe-router
+@@ -0,0 +1,2 @@
++# references moe-router.{h,cpp}
++# build glue note for the kimi-k3 fork's MoE routing path
+--
+2.45.1

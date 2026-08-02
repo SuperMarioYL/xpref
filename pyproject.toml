@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xpref"
+version = "0.1.0"
+description = "Predictive MoE expert prefetch — stages the next-firing experts from NVMe to DDR before the router fires."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "SuperMarioYL" }]
+keywords = ["moe", "kimi-k3", "deepseek", "llama-cpp", "prefetch", "inference", "expert-routing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.26",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/SuperMarioYL/xpref"
+Repository = "https://github.com/SuperMarioYL/xpref"
+Issues = "https://github.com/SuperMarioYL/xpref/issues"
+
+[project.scripts]
+xpref = "xpref.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xpref"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/xpref/engine_patch/llama_cpp_router_logit.patch" = "xpref/engine_patch/llama_cpp_router_logit.patch"
+"samples/k3-q4-128tok.bin" = "xpref/samples/k3-q4-128tok.bin"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

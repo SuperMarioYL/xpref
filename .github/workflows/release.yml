@@ -1,0 +1,58 @@
+name: release
+
+# Builds wheel + sdist into dist/ and a sha256 checksums.txt, uploaded as a
+# workflow artifact. The orchestrator attaches dist/* to the GitHub Release.
+# PyPI publishing is OPT-IN: gate it behind the PYPI_PUBLISH repo variable so a
+# fresh repo with no Trusted Publisher registered never fails the first tag.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel + sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * | tee checksums.txt
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  pypi:
+    # OPT-IN: set the repo variable PYPI_PUBLISH=true AND register a Trusted
+    # Publisher (https://pypi.org/manage/account/publishing/) before enabling.
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PYPI_PUBLISH == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/xpref
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
