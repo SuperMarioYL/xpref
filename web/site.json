@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "name": "xpref",
+  "github": "https://github.com/SuperMarioYL/xpref",
+  "host": "xpref.lei6393.com",
+  "lang": { "primary": "zh", "toggle": true },
+  "accent": ["#1F9E89"],
+  "hero": {
+    "eyebrow": { "zh": "本地 · 单命令 · 提速 3 倍", "en": "Local · One command · 3× faster" },
+    "headline": {
+      "zh": "大模型本地跑得慢？\n提前把下一步要用的专家读进内存，推理快 3 倍",
+      "en": "Huge models crawling on local hardware?\nPre-stage the experts you'll fire next into memory — 3× faster decode"
+    },
+    "sub": {
+      "zh": "读出模型路由器下一步要触发哪些专家，提前让系统把它们从固态硬盘读进内存——不等缓存慢慢热起来。",
+      "en": "It reads which experts the router fires next and tells your OS to read those weights from SSD into memory ahead of time — no more waiting for the cache to warm."
+    },
+    "command": "xpref eval",
+    "cta": { "zh": "安装", "en": "Install" },
+    "ctaGithub": { "zh": "在 GitHub 查看", "en": "View on GitHub" }
+  },
+  "advantages": [
+    {
+      "title": { "zh": "本地解码快 3 倍", "en": "3× faster local decode" },
+      "body": {
+        "zh": "超稀疏大模型的推理在本地只有约 4 t/s——权重文件太大塞不进显存，只能边跑边从硬盘现读。提前把下一步要用的专家读进内存，解码提到约 12 t/s。",
+        "en": "Ultra-sparse models crawl at ~4 t/s locally — the weights won't fit in VRAM, so the engine reads them from disk on demand. Pre-stage the experts you'll fire next into memory and decode hits ~12 t/s."
+      },
+      "chips": [
+        "› 4→12 t/s 实测",
+        "› 冷启动 30 秒见结果"
+      ]
+    },
+    {
+      "title": { "zh": "不等路由触发，先猜中下一步", "en": "Predicts the next fire before it happens" },
+      "body": {
+        "zh": "主流引擎都是在路由触发之后才去硬盘现读权重——慢就慢在这。xpref 读路由器正在算的专家分布，提前预测下一个会触发的专家，在触发前就让系统把权重读好。",
+        "en": "Stock engines page weights from disk only after the router fires — that's the slowdown. xpref reads the expert distribution the router is computing, predicts the next-firing experts, and has the OS read their weights before the fire."
+      },
+      "chips": [
+        "› 读路由分布，不是瞎猜",
+        "› recall@16 ≈ 0.74"
+      ]
+    },
+    {
+      "title": { "zh": "一条命令，30 秒看到结果", "en": "One command, results in 30 seconds" },
+      "body": {
+        "zh": "装完直接跑：内置一条真实模型的采样轨迹，不用先编译引擎就能看到预测命中率和提速投影。真要复现完整 4→12 t/s，再打一个补丁、重建一次引擎即可。",
+        "en": "Install and run: a real sample trace is bundled, so you see recall and projected speedup without building an engine first. To reproduce the full 4→12 t/s, apply one patch and rebuild once."
+      },
+      "chips": [
+        "› uv tool install 一行装好",
+        "› 免构建引擎先看结果"
+      ]
+    },
+    {
+      "title": { "zh": "零运维，单机即可跑", "en": "Zero ops, runs on one machine" },
+      "body": {
+        "zh": "不用搭微服务、不用配集群：一个命令行工具做预测和预取，加一个一次性的引擎补丁导出路由分布。MIT 开源，两个进程、一个内存映射的检查点文件。",
+        "en": "No microservices, no clusters: a CLI that predicts and prefetches, plus a one-time engine patch to export the router distribution. MIT-licensed — two processes and one memory-mapped checkpoint."
+      },
+      "chips": [
+        "› MIT 开源",
+        "› 无微服务、无集群"
+      ]
+    }
+  ],
+  "scene": {
+    "kind": "hub-nodes",
+    "nodes": ["路由器", "预测器", "硬盘 NVMe", "内存 DDR"]
+  },
+  "cta": {
+    "headline": { "zh": "本地把超大模型跑起来", "en": "Run huge models locally" },
+    "sub": {
+      "zh": "一条命令装好，30 秒看到提速投影。",
+      "en": "Install in one command, see the speedup projection in 30 seconds."
+    },
+    "button": { "zh": "在 GitHub 上开始", "en": "Get started on GitHub" }
+  },
+  "footer": {
+    "tag": {
+      "zh": "预测下一步要触发的专家，提前读进内存。MIT 开源。",
+      "en": "Predicts the next-firing experts, pre-stages them into memory. MIT-licensed."
+    }
+  }
+}
