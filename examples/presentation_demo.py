@@ -1,6 +1,11 @@
-import json, pathlib, subprocess, tempfile
-from xpref.trace import read_trace
+import json
+import pathlib
+import subprocess
+import tempfile
+
 from xpref.prefetch import ExpertLayout, Prefetcher
+from xpref.trace import read_trace
+
 trace = read_trace("samples/k3-q4-128tok.bin")
 result = subprocess.run([".venv/bin/xpref","eval","--trace","samples/k3-q4-128tok.bin","--json"],text=True,capture_output=True,check=True)
 print("Synthetic trace evaluation; t/s fields are formula projections:")
