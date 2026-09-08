@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source_revision": "31a312f3670f82f0223b6f951a94aee7778e3065",
+  "source_revision": "43ea892dc09e5f51b622456181d3e919e4c4edbe",
   "scope": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
   "steps": [
     {
