@@ -1,86 +1,215 @@
 {
-  "schema": 1,
+  "schema": 3,
   "name": "xpref",
   "github": "https://github.com/SuperMarioYL/xpref",
   "host": "xpref.lei6393.com",
-  "lang": { "primary": "zh", "toggle": true },
-  "accent": ["#1F9E89"],
+  "palette": "auto",
+  "lang": {
+    "primary": "en",
+    "toggle": true
+  },
+  "meta": {
+    "visual_style": "neon-particle",
+    "demo_source": "docs/demo-results.json"
+  },
   "hero": {
-    "eyebrow": { "zh": "本地 · 单命令 · 提速 3 倍", "en": "Local · One command · 3× faster" },
     "headline": {
-      "zh": "大模型本地跑得慢？\n提前把下一步要用的专家读进内存，推理快 3 倍",
-      "en": "Huge models crawling on local hardware?\nPre-stage the experts you'll fire next into memory — 3× faster decode"
+      "en": "Inspect expert predictions before testing a prefetch policy.",
+      "zh": "测试预取策略前，先检查专家预测。"
     },
     "sub": {
-      "zh": "读出模型路由器下一步要触发哪些专家，提前让系统把它们从固态硬盘读进内存——不等缓存慢慢热起来。",
-      "en": "It reads which experts the router fires next and tells your OS to read those weights from SSD into memory ahead of time — no more waiting for the cache to warm."
+      "en": "xpref combines recent router logits and observed expert transitions to predict next-token expert IDs, evaluates those predictions on saved traces and can hint mapped checkpoint ranges to the OS.",
+      "zh": "xpref 结合最近路由 logits 与已观察专家转移，预测下一 token 的专家 ID，在保存轨迹上评估，并可向操作系统提示映射后的 checkpoint 字节区间。"
     },
-    "command": "xpref eval",
-    "cta": { "zh": "安装", "en": "Install" },
-    "ctaGithub": { "zh": "在 GitHub 查看", "en": "View on GitHub" }
+    "href": "#quickstart"
   },
   "advantages": [
     {
-      "title": { "zh": "本地解码快 3 倍", "en": "3× faster local decode" },
-      "body": {
-        "zh": "超稀疏大模型的推理在本地只有约 4 t/s——权重文件太大塞不进显存，只能边跑边从硬盘现读。提前把下一步要用的专家读进内存，解码提到约 12 t/s。",
-        "en": "Ultra-sparse models crawl at ~4 t/s locally — the weights won't fit in VRAM, so the engine reads them from disk on demand. Pre-stage the experts you'll fire next into memory and decode hits ~12 t/s."
+      "title": {
+        "en": "Compare next-token sets",
+        "zh": "比较下一 token 集合"
       },
-      "chips": [
-        "› 4→12 t/s 实测",
-        "› 冷启动 30 秒见结果"
-      ]
+      "body": {
+        "en": "Predictions are scored against the following token.",
+        "zh": "预测与后一 token 的集合评分。"
+      }
     },
     {
-      "title": { "zh": "不等路由触发，先猜中下一步", "en": "Predicts the next fire before it happens" },
-      "body": {
-        "zh": "主流引擎都是在路由触发之后才去硬盘现读权重——慢就慢在这。xpref 读路由器正在算的专家分布，提前预测下一个会触发的专家，在触发前就让系统把权重读好。",
-        "en": "Stock engines page weights from disk only after the router fires — that's the slowdown. xpref reads the expert distribution the router is computing, predicts the next-firing experts, and has the OS read their weights before the fire."
+      "title": {
+        "en": "Inspect mapping separately",
+        "zh": "独立检查字节映射"
       },
-      "chips": [
-        "› 读路由分布，不是瞎猜",
-        "› recall@16 ≈ 0.74"
-      ]
+      "body": {
+        "en": "Explicit ranges keep layout assumptions visible.",
+        "zh": "显式区间让布局假设可见。"
+      }
     },
     {
-      "title": { "zh": "一条命令，30 秒看到结果", "en": "One command, results in 30 seconds" },
-      "body": {
-        "zh": "装完直接跑：内置一条真实模型的采样轨迹，不用先编译引擎就能看到预测命中率和提速投影。真要复现完整 4→12 t/s，再打一个补丁、重建一次引擎即可。",
-        "en": "Install and run: a real sample trace is bundled, so you see recall and projected speedup without building an engine first. To reproduce the full 4→12 t/s, apply one patch and rebuild once."
+      "title": {
+        "en": "Separate recall from speed",
+        "zh": "区分召回与速度"
       },
-      "chips": [
-        "› uv tool install 一行装好",
-        "› 免构建引擎先看结果"
-      ]
+      "body": {
+        "en": "JSON labels projected throughput alongside recall.",
+        "zh": "JSON 将投影吞吐与召回并列标注。"
+      }
+    }
+  ],
+  "demo": {
+    "title": {
+      "en": "Run it on a complete example",
+      "zh": "运行完整示例"
+    },
+    "note": {
+      "en": "Python 3.10+; the shown installation uses 3.12. The demo evaluates the complete 128-token synthetic trace and hints one page-aligned synthetic file range.",
+      "zh": "支持 Python 3.10+，此处安装使用 3.12。示例评估完整 128-token 合成轨迹，并提示一个页对齐的合成文件区间。"
+    },
+    "source": "https://github.com/SuperMarioYL/xpref/blob/main/docs/demo-results.json",
+    "steps": [
+      {
+        "label": "Recorded run",
+        "body": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
+        "command": ".venv/bin/python examples/presentation_demo.py",
+        "output": "Synthetic trace evaluation; t/s fields are formula projections:\n{\n  \"num_tokens\": 128,\n  \"num_layers\": 8,\n  \"num_experts\": 896,\n  \"num_active\": 16,\n  \"recall_at_k\": 0.7405265748031497,\n  \"recall_at_16\": 0.7405265748031497,\n  \"per_layer_recall\": [\n    0.7450787401574803,\n    0.7362204724409449,\n    0.7367125984251969,\n    0.7401574803149606,\n    0.7406496062992126,\n    0.7396653543307087,\n    0.7426181102362205,\n    0.7431102362204725\n  ],\n  \"predictions_made\": 1016,\n  \"reactive_tps\": 4.0,\n  \"projected_predictive_tps\": 12.0,\n  \"speedup\": 3.0\n}\n{\"synthetic_checkpoint_bytes\": 16384, \"hint_api_available\": true, \"hinted_offset\": 4096, \"hinted_bytes\": 4096}",
+        "image": "/assets/presentation/demo-0-light.svg",
+        "imageDark": "/assets/presentation/demo-0-dark.svg"
+      }
+    ]
+  },
+  "quickstart": {
+    "title": {
+      "en": "Try it locally",
+      "zh": "本地上手"
+    },
+    "body": {
+      "en": "Python 3.10+; the shown installation uses 3.12. The demo evaluates the complete 128-token synthetic trace and hints one page-aligned synthetic file range.",
+      "zh": "支持 Python 3.10+，此处安装使用 3.12。示例评估完整 128-token 合成轨迹，并提示一个页对齐的合成文件区间。"
+    },
+    "steps": [
+      {
+        "title": {
+          "en": "Install from source",
+          "zh": "从源码安装"
+        },
+        "code": "git clone https://github.com/SuperMarioYL/xpref.git\ncd xpref\npython3.12 -m venv .venv\nsource .venv/bin/activate\npython -m pip install -e ."
+      },
+      {
+        "title": {
+          "en": "Run the included example",
+          "zh": "运行随仓示例"
+        },
+        "code": ".venv/bin/python examples/presentation_demo.py"
+      }
+    ]
+  },
+  "limitations": [
+    {
+      "en": "The bundled K3-labelled trace is synthetic, generated by scripts/gen_sample_trace.py. Its recall is not measured model accuracy, and 4/12 t/s are hardcoded projection assumptions rather than hardware measurements.",
+      "zh": "随仓带 K3 标签的轨迹由 scripts/gen_sample_trace.py 合成，其召回不代表实测模型准确率；4/12 t/s 是写入代码的投影假设，不是硬件实测。"
     },
     {
-      "title": { "zh": "零运维，单机即可跑", "en": "Zero ops, runs on one machine" },
-      "body": {
-        "zh": "不用搭微服务、不用配集群：一个命令行工具做预测和预取，加一个一次性的引擎补丁导出路由分布。MIT 开源，两个进程、一个内存映射的检查点文件。",
-        "en": "No microservices, no clusters: a CLI that predicts and prefetches, plus a one-time engine patch to export the router distribution. MIT-licensed — two processes and one memory-mapped checkpoint."
-      },
-      "chips": [
-        "› MIT 开源",
-        "› 无微服务、无集群"
-      ]
+      "en": "MADV_WILLNEED is advisory; hinted byte counts do not establish disk reads, residency or throughput gain. Uniform layout is only a synthetic approximation; real weights need verified ranges.",
+      "zh": "MADV_WILLNEED 只是建议；提示字节数不证明磁盘读取、驻留或吞吐提升。均匀布局只是合成近似，真实权重需核实字节区间。"
+    },
+    {
+      "en": "The bundled engine patch is an illustrative reference requiring adaptation, not a validated drop-in llama.cpp integration. This demo does not attach a live model or move data into GPU memory.",
+      "zh": "随仓引擎 patch 是需要适配的示意参考，不是已验证的即用 llama.cpp 集成。示例不附加在线模型，也不向 GPU 内存搬运数据。"
     }
   ],
   "scene": {
-    "kind": "hub-nodes",
-    "nodes": ["路由器", "预测器", "硬盘 NVMe", "内存 DDR"]
+    "kind": "neon-graph",
+    "fallback": "/assets/presentation/scene-dark.svg",
+    "fallbackLight": "/assets/presentation/scene-light.svg"
   },
-  "cta": {
-    "headline": { "zh": "本地把超大模型跑起来", "en": "Run huge models locally" },
-    "sub": {
-      "zh": "一条命令装好，30 秒看到提速投影。",
-      "en": "Install in one command, see the speedup projection in 30 seconds."
+  "story": {
+    "intro": {
+      "title": {
+        "en": "A concrete task",
+        "zh": "从实际任务出发"
+      },
+      "body": {
+        "en": "A prefetch experiment needs both a prediction and an exact mapping from an expert to weight bytes. Saved traces let you study recall before bringing the predictor into an engine and measuring actual I/O.",
+        "zh": "预取实验既需要预测，也需要专家到权重字节的准确映射。保存轨迹能先研究召回率，再接入引擎测量真实 I/O。"
+      }
     },
-    "button": { "zh": "在 GitHub 上开始", "en": "Get started on GitHub" }
-  },
-  "footer": {
-    "tag": {
-      "zh": "预测下一步要触发的专家，提前读进内存。MIT 开源。",
-      "en": "Predicts the next-firing experts, pre-stages them into memory. MIT-licensed."
-    }
+    "sections": [
+      {
+        "title": {
+          "en": "Follow the operation",
+          "zh": "处理过程"
+        },
+        "body": {
+          "en": "Trace or ring records supply per-layer logits and fired IDs. Predictor blends a softmax prior with decayed transition counts and chooses the active-set size. ExpertLayout maps IDs to ranges; Prefetcher uses mmap and MADV_WILLNEED. Evaluation compares each prediction with the next token’s actual set.",
+          "zh": "轨迹或 ring 记录提供逐层 logits 与已激活 ID。Predictor 混合 softmax 先验与衰减转移计数，选择与活跃集合等大的预测。ExpertLayout 将 ID 映射为区间，Prefetcher 使用 mmap 和 MADV_WILLNEED；评估将预测与下一 token 的真实集合比较。"
+        },
+        "image": {
+          "light": "/assets/presentation/process-light.svg",
+          "dark": "/assets/presentation/process-dark.svg",
+          "alt": {
+            "en": "Follow the operation",
+            "zh": "处理过程"
+          }
+        }
+      },
+      {
+        "title": {
+          "en": "Inside xpref",
+          "zh": "xpref 的内部流程"
+        },
+        "body": {
+          "en": "Trace or ring records supply per-layer logits and fired IDs. Predictor blends a softmax prior with decayed transition counts and chooses the active-set size. ExpertLayout maps IDs to ranges; Prefetcher uses mmap and MADV_WILLNEED. Evaluation compares each prediction with the next token’s actual set.",
+          "zh": "轨迹或 ring 记录提供逐层 logits 与已激活 ID。Predictor 混合 softmax 先验与衰减转移计数，选择与活跃集合等大的预测。ExpertLayout 将 ID 映射为区间，Prefetcher 使用 mmap 和 MADV_WILLNEED；评估将预测与下一 token 的真实集合比较。"
+        },
+        "image": {
+          "light": "/assets/presentation/architecture-light.svg",
+          "dark": "/assets/presentation/architecture-dark.svg",
+          "alt": {
+            "en": "Inside xpref",
+            "zh": "xpref 的内部流程"
+          }
+        }
+      },
+      {
+        "title": {
+          "en": "Connect the pieces",
+          "zh": "输入与输出"
+        },
+        "body": {
+          "en": "Choose the input and output route that matches your workflow. The local example below exercises the stated subset.",
+          "zh": "根据工作流选择输入与输出路径。本文本地示例验证其中明确说明的子流程。"
+        },
+        "image": {
+          "light": "/assets/presentation/integrations-light.svg",
+          "dark": "/assets/presentation/integrations-dark.svg",
+          "alt": {
+            "en": "Connect the pieces",
+            "zh": "输入与输出"
+          }
+        }
+      }
+    ],
+    "details": [
+      {
+        "title": {
+          "en": "Configuration",
+          "zh": "配置"
+        },
+        "body": {
+          "en": "eval accepts --ngram-n (3), --topk-weight (0.6) and --ngram-weight (0.4). attach requires --checkpoint and takes either --replay or --ring; a bare ring name resolves under the platform shared-memory/temp location. --layout is JSON {layer: {expert_id: [offset, length]}}. patch-path locates the reference patch for inspection. Measure engine throughput independently when evaluating a real integration.",
+          "zh": "eval 支持 --ngram-n（3）、--topk-weight（0.6）、--ngram-weight（0.4）。attach 要求 --checkpoint，并选择 --replay 或 --ring；裸 ring 名在平台共享内存/临时目录解析。--layout 使用 JSON {layer: {expert_id: [offset, length]}}。patch-path 定位参考 patch 供检查；真实集成评估须独立测量引擎吞吐。"
+        }
+      },
+      {
+        "title": {
+          "en": "Further use",
+          "zh": "进一步使用"
+        },
+        "body": {
+          "en": "Run these commands from the repository root after installation. Replace paths for your own data.",
+          "zh": "安装后在仓库根目录运行以下命令；处理自己的数据时替换相应路径。"
+        },
+        "code": "xpref trace-info --trace samples/k3-q4-128tok.bin\nxpref eval --trace samples/k3-q4-128tok.bin --json\nxpref eval --trace samples/k3-q4-128tok.bin --topk-weight 1 --ngram-weight 0\n# After adapting and validating your own engine ring and tensor layout:\nxpref attach --ring /path/to/router.xring --checkpoint /path/to/weights.gguf --layout /path/to/layout.json --max-tokens 128"
+      }
+    ]
   }
 }

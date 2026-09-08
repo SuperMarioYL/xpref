@@ -1,0 +1,90 @@
+{
+  "name": "xpref",
+  "tagline": "Inspect expert predictions before testing a prefetch policy.",
+  "architecture": {
+    "title": "Inside xpref",
+    "nodes": [
+      {
+        "title": "Trace / ring input",
+        "detail": "src/xpref/trace.py; ringbuf.py"
+      },
+      {
+        "title": "Expert predictor",
+        "detail": "src/xpref/predictor.py"
+      },
+      {
+        "title": "Byte-range layout",
+        "detail": "src/xpref/prefetch.py"
+      },
+      {
+        "title": "Advisory readahead",
+        "detail": "mmap + MADV_WILLNEED"
+      },
+      {
+        "title": "Recall evaluation",
+        "detail": "src/xpref/attach.py"
+      }
+    ],
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        3,
+        4
+      ]
+    ]
+  },
+  "process": {
+    "title": "From input to a useful result",
+    "steps": [
+      {
+        "title": "Evaluate next token",
+        "detail": "Synthetic routing sequence"
+      },
+      {
+        "title": "Read prediction recall",
+        "detail": "Separate from t/s projection"
+      },
+      {
+        "title": "Hint one range",
+        "detail": "16KiB synthetic checkpoint"
+      }
+    ],
+    "result": "The predictor reports recall on the synthetic trace; the file experiment reports only whether an advisory range hint was accepted."
+  },
+  "integrations": {
+    "title": "Supported input and output routes",
+    "items": [
+      {
+        "title": "Binary router trace",
+        "detail": "Offline logits and fired IDs"
+      },
+      {
+        "title": "Ring buffer",
+        "detail": "Prototype live record consumer"
+      },
+      {
+        "title": "Explicit JSON layout",
+        "detail": "Expert-to-byte mapping"
+      },
+      {
+        "title": "mmap / madvise",
+        "detail": "OS page-cache hints"
+      },
+      {
+        "title": "CLI JSON",
+        "detail": "Recall and formula projections"
+      }
+    ]
+  }
+}

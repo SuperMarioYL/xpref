@@ -1,0 +1,38 @@
+{
+  "mode": "auto",
+  "id": "56aae6-6a70e7-acf2f6-376fd64c09cd",
+  "identity": "https://github.com/supermarioyl/xpref",
+  "primary": "#56aae6",
+  "secondary": "#6a70e7",
+  "highlight": "#acf2f6",
+  "dark": {
+    "bg": "#050a12",
+    "panel": "#0c141f",
+    "code": "#0a121d",
+    "ink": "#eefcfd",
+    "muted": "#95adc4",
+    "line": "#172d41",
+    "primary": "#56aae6",
+    "secondary": "#6b71e7",
+    "highlight": "#acf2f6",
+    "accent": "#56aae6",
+    "buttonStart": "#3f7ca8",
+    "buttonEnd": "#656adc",
+    "buttonText": "#ffffff"
+  },
+  "light": {
+    "bg": "#f9fcfe",
+    "panel": "#f7fbfe",
+    "code": "#f3f9fd",
+    "ink": "#132130",
+    "muted": "#556f88",
+    "line": "#cbe5f7",
+    "primary": "#3c77a2",
+    "secondary": "#6167d3",
+    "highlight": "#56787a",
+    "accent": "#3c77a2",
+    "buttonStart": "#3f7ca8",
+    "buttonEnd": "#656adc",
+    "buttonText": "#ffffff"
+  }
+}

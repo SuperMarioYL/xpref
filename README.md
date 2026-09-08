@@ -1,143 +1,150 @@
-<div align="right"><sub><a href="./README.en.md">English</a>&nbsp;&nbsp;⇄&nbsp;&nbsp;<b>简体中文</b></sub></div>
+[English](./README.en.md) · [Website](https://xpref.lei6393.com) · [GitHub](https://github.com/SuperMarioYL/xpref)
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/hero-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/hero-light.svg">
-    <img src="./assets/hero-light.svg" width="880" alt="xpref — predictive MoE expert prefetch">
-  </picture>
-</p>
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/hero-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/hero-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/hero-dark.svg">
+  <img src="./assets/presentation/hero-light.svg" width="960" alt="Hero diagram">
+</picture>
 
-<p align="center"><sub>基于路由门控 logits 预测 Kimi K3 / DeepSeek V4 下一个将触发的专家并提前从 NVMe 预载入 DDR，把超稀疏 (896/16) MoE 的解码从 ~4 t/s 反应式换页提速至 ~12 t/s。</sub></p>
+# xpref
 
-<p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="license"></a>
-  <a href="https://github.com/SuperMarioYL/xpref/releases"><img src="https://img.shields.io/github/v/release/SuperMarioYL/xpref?label=release" alt="release"></a>
-  <a href="https://github.com/SuperMarioYL/xpref/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SuperMarioYL/xpref/ci.yml?branch=main&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="python">
-  <img src="https://img.shields.io/badge/Kimi_K3-ready-5E5CE6" alt="Kimi K3 ready">
-  <img src="https://img.shields.io/badge/DeepSeek_V4-compat-10A37F" alt="DeepSeek V4 compat">
-</p>
+**测试预取策略前，先检查专家预测。**
 
----
+xpref 结合最近路由 logits 与已观察专家转移，预测下一 token 的专家 ID，在保存轨迹上评估，并可向操作系统提示映射后的 checkpoint 字节区间。
 
-**预测下一个将触发的 MoE 专家，在路由门控之前把它从 NVMe 预载入 DDR —— 把 Kimi K3 的 ~4 t/s 反应式换页提到 ~12 t/s。**
+## 为什么需要它
 
-<h2><img src="https://api.iconify.design/tabler:topology-star-3.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 架构</h2>
+预取实验既需要预测，也需要专家到权重字节的准确映射。保存轨迹能先研究召回率，再接入引擎测量真实 I/O。
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/atlas-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./assets/atlas-light.svg">
-    <img src="./assets/atlas-light.svg" width="880" alt="架构：llama.cpp (patched) → shm 环 → xpref 预测器 → mmap 检查点 (madvise → DDR)">
-  </picture>
-</p>
+- **比较下一 token 集合** — 预测与后一 token 的集合评分。
+- **独立检查字节映射** — 显式区间让布局假设可见。
+- **区分召回与速度** — JSON 将投影吞吐与召回并列标注。
 
-两个进程：打过 patch 的 llama.cpp 引擎把每 token 每层的路由门控 logits 写进一个共享环；`xpref attach` 读环、跑预测器、对预测会触发的专家权重页发 `madvise(MADV_WILLNEED)`，让内核在路由真正触发前就把权重从 NVMe 读进 DDR 页缓存。没有微服务、没有 K8s，只有引擎 + 守护进程 + 一个 mmap 的检查点。
+## 架构
 
-<h2><img src="https://api.iconify.design/tabler:bulb.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 为什么做这个</h2>
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/architecture-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/architecture-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/architecture-dark.svg">
+  <img src="./assets/presentation/architecture-light.svg" width="960" alt="Architecture diagram">
+</picture>
 
-Kimi K3 这类超稀疏 MoE（896 个专家，每 token 只激活 16 个）在消费级硬件上跑得起来，但放不进 VRAM：93% 的 1.56 TB 检查点是路由专家权重，引擎在路由门控触发**之后**才从 NVMe 反应式换页，解码只有 ~4 t/s，得等系统页缓存意外把热专家热起来才慢慢爬升。r/LocalLLaMA 上跑 Kimi K3 的家用实验室（768 GB DDR5 + 2x5090）已经把这个 [「预热 / 换页」现象](https://www.reddit.com/r/LocalLLaMA/comments/1va0rce/) 记录在案——解码 t/s 随时间缓慢上升；SavunOski 发布的 K3 权重是本地运行者的部署检查点。
+轨迹或 ring 记录提供逐层 logits 与已激活 ID。Predictor 混合 softmax 先验与衰减转移计数，选择与活跃集合等大的预测。ExpertLayout 将 ID 映射为区间，Prefetcher 使用 mmap 和 MADV_WILLNEED；评估将预测与下一 token 的真实集合比较。
 
-xpref 不等缓存意外热起来：它读路由门控 logits、预测下一个将触发的专家、在触发前把对应权重页提前换页——把本地 Agent 解码循环从 ~4 t/s 提到 ~12 t/s。这个原语目前没有任何主流引擎（llama.cpp / vLLM / SGLang / ktransformers）实现，它们都是在触发后反应式换页。
+| 组件 | 职责 |
+| --- | --- |
+| `Trace / ring input` | src/xpref/trace.py; ringbuf.py |
+| `Expert predictor` | src/xpref/predictor.py |
+| `Byte-range layout` | src/xpref/prefetch.py |
+| `Advisory readahead` | mmap + MADV_WILLNEED |
+| `Recall evaluation` | src/xpref/attach.py |
 
-<h2><img src="https://api.iconify.design/tabler:scale.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 与 ktransformers 对比</h2>
+## 安装与快速上手
 
-| 能力 | xpref | [ktransformers](https://github.com/kvcache-ai/ktransformers) |
-|---|:---:|:---:|
-| 预测下一个触发专家（读路由 logits） | ✓ | — |
-| 专家权重换页到 DDR | ✓ | ✓ |
-| VRAM / CUDA host-pinned 暂存 | — (v0.2) | partial |
-| 目标模型 | Kimi K3 / DeepSeek V4（896 专家超稀疏） | DeepSeek V2/V3 |
-| 社区成熟度 | partial（新） | ✓（5–8k stars） |
-
-ktransformers 是最近的同类项目（DeepSeek-V2/V3 的 CPU+GPU MoE offload，~2 个月涨到几千 star）——证明专家换页这个品类真实存在，而**预测**是没人占的那一格。它在 GPU 暂存和社区成熟度上更强；xpref 的差异在于「触发前预测」这一原语。
-
-<h2><img src="https://api.iconify.design/tabler:rocket.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 安装</h2>
+使用仓库清单声明的运行时版本。以下源码安装步骤可复现随仓示例。
 
 ```bash
-# 任选其一
-uv tool install xpref                                          # PyPI（发布后）
-uv tool install git+https://github.com/SuperMarioYL/xpref      # 首次发布前从 git
-# 或从克隆安装：git clone … && cd xpref && uv tool install .
+git clone https://github.com/SuperMarioYL/xpref.git
+cd xpref
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
-<h2><img src="https://api.iconify.design/tabler:rocket.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 快速开始</h2>
+支持 Python 3.10+，此处安装使用 3.12。示例评估完整 128-token 合成轨迹，并提示一个页对齐的合成文件区间。
 
 ```bash
-xpref eval          # 在打包的 Kimi K3 Q4 采样轨迹上跑预测器，看 recall@16 与 4→12 t/s
+.venv/bin/python examples/presentation_demo.py
 ```
 
-<details><summary>示例输出</summary>
+## 实际运行示例
 
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/process-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/process-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/process-dark.svg">
+  <img src="./assets/presentation/process-light.svg" width="960" alt="Process diagram">
+</picture>
+
+The predictor reports recall on the synthetic trace; the file experiment reports only whether an advisory range hint was accepted.
+
+```text
+Synthetic trace evaluation; t/s fields are formula projections:
+{
+  "num_tokens": 128,
+  "num_layers": 8,
+  "num_experts": 896,
+  "num_active": 16,
+  "recall_at_k": 0.7405265748031497,
+  "recall_at_16": 0.7405265748031497,
+  "per_layer_recall": [
+    0.7450787401574803,
+    0.7362204724409449,
+    0.7367125984251969,
+    0.7401574803149606,
+    0.7406496062992126,
+    0.7396653543307087,
+    0.7426181102362205,
+    0.7431102362204725
+  ],
+  "predictions_made": 1016,
+  "reactive_tps": 4.0,
+  "projected_predictive_tps": 12.0,
+  "speedup": 3.0
+}
+{"synthetic_checkpoint_bytes": 16384, "hint_api_available": true, "hinted_offset": 4096, "hinted_bytes": 4096}
 ```
-xpref eval — k3-q4-128tok.bin
-  tokens=128 layers=8 experts=896 active=16
-  recall@16 = 0.7405
-  reactive t/s  = 4.0
-  xpref  t/s   = 12.00  (3.00x)
-```
-</details>
 
-从冷安装到第一个可见结果不到 30 秒，无需构建引擎。
+完整命令与输出保存在 [docs/demo-results.json](./docs/demo-results.json). 输入和复现代码均随仓提供。
 
-<h2><img src="https://api.iconify.design/tabler:terminal-2.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 用法</h2>
+![已有脚本绘制示意](./assets/demo.gif)
+
+已有 GIF 由 scripts/gen_demo_gif.py 使用预设文字绘制，是示意而非实时硬件录制。可复现结果以上方实际输出为准。
+
+## 用法
+
+安装后在仓库根目录运行以下命令；处理自己的数据时替换相应路径。
 
 ```bash
-# 1) 离线评估，JSON 输出（CI 友好）
+xpref trace-info --trace samples/k3-q4-128tok.bin
 xpref eval --trace samples/k3-q4-128tok.bin --json
-
-# 2) 回放演示：模拟解码循环，逐 token 打印 recall 与投影 t/s（4→12）
-truncate -s 256k /tmp/ckpt.gguf          # 任意检查点占位
-xpref attach --replay --checkpoint /tmp/ckpt.gguf
-
-# 3) 真实路径（一次性）：打 patch + 重建 llama.cpp kimi-k3 fork
-git -C llama.cpp apply "$(xpref patch-path)"
-cmake --build build
-./build/bin/llama-cli --model kimi-k3-q4.gguf ... &      # 引擎
-xpref attach --ring xpref_router --checkpoint kimi-k3-q4.gguf   # 守护进程
+xpref eval --trace samples/k3-q4-128tok.bin --topk-weight 1 --ngram-weight 0
+# After adapting and validating your own engine ring and tensor layout:
+xpref attach --ring /path/to/router.xring --checkpoint /path/to/weights.gguf --layout /path/to/layout.json --max-tokens 128
 ```
 
-子命令：`eval`（离线打分）、`attach`（实时 / 回放）、`patch-path`（打印 bundled patch 路径）、`trace-info`（轨迹元信息）。完整参数见 `xpref --help`。
+## 配置
 
-<h2><img src="https://api.iconify.design/tabler:photo.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 演示</h2>
+eval 支持 --ngram-n（3）、--topk-weight（0.6）、--ngram-weight（0.4）。attach 要求 --checkpoint，并选择 --replay 或 --ring；裸 ring 名在平台共享内存/临时目录解析。--layout 使用 JSON {layer: {expert_id: [offset, length]}}。patch-path 定位参考 patch 供检查；真实集成评估须独立测量引擎吞吐。
 
-<p align="center"><img src="./assets/demo.gif" width="780" alt="xpref eval + attach --replay 演示：recall@16 与 4→12 t/s"></p>
+## 集成与职责分工
 
-`eval` 在打包的 Kimi K3 采样轨迹上打出 recall@16 ≈ 0.74 与 12 t/s 投影；`attach --replay` 模拟解码循环，逐 token 打印预测命中与投影 t/s。真实的 4→12 t/s 在打 patch + 重建 llama.cpp 后复现（见用法 §3）。CI（`.github/workflows/demo.yml`）可在打 tag 时用 vhs 重新渲染 `assets/demo.gif`。
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="./assets/presentation/integrations-mobile-dark.svg">
+  <source media="(max-width: 600px)" srcset="./assets/presentation/integrations-mobile-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/presentation/integrations-dark.svg">
+  <img src="./assets/presentation/integrations-light.svg" width="960" alt="Integrations diagram">
+</picture>
 
-<h2><img src="https://api.iconify.design/tabler:adjustments.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 配置</h2>
+根据工作流选择输入与输出路径。本文本地示例验证其中明确说明的子流程。
 
-| 键 / 选项 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `--trace` | path | 内置 K3 采样 | 路由门控 logits 轨迹（`eval`） |
-| `--replay` | path | 内置 K3 采样 | 回放轨迹（`attach`，离线模式） |
-| `--ring` | name | `xpref_router` | 共享环名（Linux `/dev/shm`，macOS `/tmp`） |
-| `--checkpoint` | path | — | mmap 的 GGUF 检查点（`attach`） |
-| `--layout` | path | 均匀 | 专家→字节范围 JSON 布局（`{layer: {expert: [off, len]}}`） |
-| `--ngram-n` | int | 3 | n-gram 阶数 |
-| `--topk-weight` | float | 0.6 | top-k 先验权重 |
-| `--ngram-weight` | float | 0.4 | n-gram 先验权重 |
-| `XPREF_RING` | env | `xpref_router` | 引擎端共享环名（patch 读取） |
+| 路径 | 已实现职责 |
+| --- | --- |
+| Binary router trace | Offline logits and fired IDs |
+| Ring buffer | Prototype live record consumer |
+| Explicit JSON layout | Expert-to-byte mapping |
+| mmap / madvise | OS page-cache hints |
+| CLI JSON | Recall and formula projections |
 
-<h2><img src="https://api.iconify.design/tabler:map-2.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 路线图</h2>
+## 限制与后续方向
 
-- [x] **m1** 路由 logits 轨迹格式 + n-gram/top-k 预测器 + 离线评估（recall@16 > 0.6）
-- [x] **m2** llama.cpp kimi-k3 fork patch + 共享环 + 实时 attach + madvise 预取（4→~12 t/s）
-- [x] **m3** `uv tool install` 打包 + 双语 README + 演示
-- [ ] v0.2 VRAM / CUDA host-pinned 暂存（v0.1 仅 DDR 页缓存）
-- [ ] v0.2 学习型预测器（MLP / transformer）
-- [ ] v0.3 vLLM / SGLang 集成（v0.1 仅 llama.cpp kimi-k3 fork）
-- [ ] v0.3+ Windows 支持（mmap/madvise 语义差异）
+- 随仓带 K3 标签的轨迹由 scripts/gen_sample_trace.py 合成，其召回不代表实测模型准确率；4/12 t/s 是写入代码的投影假设，不是硬件实测。
+- MADV_WILLNEED 只是建议；提示字节数不证明磁盘读取、驻留或吞吐提升。均匀布局只是合成近似，真实权重需核实字节区间。
+- 随仓引擎 patch 是需要适配的示意参考，不是已验证的即用 llama.cpp 集成。示例不附加在线模型，也不向 GPU 内存搬运数据。
 
-<h2><img src="https://api.iconify.design/tabler:git-pull-request.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 贡献</h2>
+已验证的引擎生产端、准确 GGUF 布局提取与端到端性能实测是下一步集成工作；GPU/锁页内存搬运不在当前链路。
 
-MIT — 见 [LICENSE](./LICENSE)。欢迎提 [issue](https://github.com/SuperMarioYL/xpref/issues) 或 PR。开发：`pip install -e ".[dev]"` 然后 `python -m unittest discover -s tests`。
+## 许可与贡献
 
-<h2><img src="https://api.iconify.design/tabler:share.svg?color=%230071E3&width=24" height="22" align="absmiddle" alt=""> 分享</h2>
-
-```
-xpref — 用路由 logits 预测 Kimi K3 的 896 个专家里下一个会触发的，在路由门控前提前从 NVMe 预载入 DDR。本地解码 4→12 t/s。 https://github.com/SuperMarioYL/xpref
-```
-
-<p align="center"><sub><a href="./LICENSE">MIT</a> © 2026 SuperMarioYL</sub></p>
+许可见 [LICENSE](./LICENSE). 反馈问题时请提供最小输入、执行命令和实际输出。

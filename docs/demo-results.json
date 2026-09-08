@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_revision": "31a312f3670f82f0223b6f951a94aee7778e3065",
+  "scope": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
+  "steps": [
+    {
+      "label": "Recorded run",
+      "body": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
+      "command": ".venv/bin/python examples/presentation_demo.py",
+      "output": "Synthetic trace evaluation; t/s fields are formula projections:\n{\n  \"num_tokens\": 128,\n  \"num_layers\": 8,\n  \"num_experts\": 896,\n  \"num_active\": 16,\n  \"recall_at_k\": 0.7405265748031497,\n  \"recall_at_16\": 0.7405265748031497,\n  \"per_layer_recall\": [\n    0.7450787401574803,\n    0.7362204724409449,\n    0.7367125984251969,\n    0.7401574803149606,\n    0.7406496062992126,\n    0.7396653543307087,\n    0.7426181102362205,\n    0.7431102362204725\n  ],\n  \"predictions_made\": 1016,\n  \"reactive_tps\": 4.0,\n  \"projected_predictive_tps\": 12.0,\n  \"speedup\": 3.0\n}\n{\"synthetic_checkpoint_bytes\": 16384, \"hint_api_available\": true, \"hinted_offset\": 4096, \"hinted_bytes\": 4096}"
+    }
+  ]
+}
