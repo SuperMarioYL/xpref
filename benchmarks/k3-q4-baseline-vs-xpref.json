@@ -11,21 +11,21 @@
     "decode_tps": 4.0
   },
   "xpref": {
-    "predictor": "n-gram + top-k heuristic (v0.1, non-learned)",
-    "recall_at_16": 0.7405,
+    "predictor": "n-gram + top-k heuristic (v0.2, non-learned)",
+    "recall_at_16": 0.8154,
     "projected_decode_tps": 12.0,
     "speedup": 3.0,
     "per_layer_recall": [
-      0.7451,
-      0.7362,
-      0.7367,
-      0.7402,
-      0.7406,
-      0.7397,
-      0.7426,
-      0.7431
+      0.8209,
+      0.8095,
+      0.8115,
+      0.8189,
+      0.8125,
+      0.8155,
+      0.8184,
+      0.8159
     ]
   },
   "note": "Reactive t/s is the observed ~4 t/s on 768 GB DDR5 + NVMe paging; xpref projected t/s models decode cost as seek-dominated with misses falling from num_active to (1-recall)*num_active, capped at the bandwidth ceiling. Real measured t/s is read off llama-cli's output after applying the bundled patch + rebuild.",
-  "generated_at": "2026-08-02T20:39:50+00:00"
+  "generated_at": "2026-09-09T00:00:00+00:00"
 }

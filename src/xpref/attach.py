@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .predictor import Predictor
+from .predictor import Prediction, Predictor
 from .prefetch import ExpertLayout, Prefetcher
 from .ringbuf import RingBuffer
 from .trace import Trace, read_trace
@@ -63,16 +63,16 @@ def _group_by_token(records: list[dict]) -> dict[int, list[dict]]:
 
 
 def _run_token(predictor: Predictor, logits_tok: np.ndarray, fired_tok: np.ndarray,
-              prefetcher: Prefetcher | None, num_layers: int) -> tuple[int, int]:
-    """Observe a token, predict next, prefetch. Returns (hits?, bytes)."""
+               prefetcher: Prefetcher | None) -> tuple[list[Prediction], int]:
+    """Observe a token, predict next, prefetch. Returns (predictions, bytes hinted)."""
     predictor.observe(logits_tok, fired_tok)
     preds = predictor.predict_next()
     bytes_hinted = 0
-    for p in preds:
-        if prefetcher is not None:
+    if prefetcher is not None:
+        for p in preds:
             pairs = [(p.layer, int(eid)) for eid in p.ids]
             bytes_hinted += prefetcher.prefetch_many(pairs)
-    return 0, bytes_hinted
+    return preds, bytes_hinted
 
 
 def replay_attach(trace_path: str | Path, checkpoint_path: str | Path,
@@ -110,25 +110,17 @@ def replay_attach(trace_path: str | Path, checkpoint_path: str | Path,
     for t in range(T - 1):
         logits_tok = tr.logits[t]  # (L, E)
         fired_tok = tr.fired[t]  # (L, A)
-        _run_token(predictor, logits_tok, fired_tok, prefetcher, L)
-        preds = predictor.predict_next() if t + 1 < T else None
-        if preds is not None:
-            actual = tr.fired[t + 1]  # (L, A)
-            layer_hits = []
-            layer_bytes = 0
-            for p in preds:
-                layer_hits.append(p.overlap_with(actual[p.layer]))
-                if prefetcher is not None:
-                    pairs = [(p.layer, int(eid)) for eid in p.ids]
-                    layer_bytes += prefetcher.prefetch_many(pairs)
-            rec = float(np.mean(layer_hits))
-            recalls.append(rec)
-            bytes_total += layer_bytes
-            tps = projected_tps(rec, A)
-            if verbose and (t % max(1, T // 16) == 0 or t == T - 2):
-                print(f"  {t:>4} {rec:>8.3f} "
-                      f"{int(round(rec * A)):>4}/{A:<4} {tps:>9.2f} "
-                      f"{layer_bytes / 1024:>8.0f} KB")
+        preds, layer_bytes = _run_token(predictor, logits_tok, fired_tok, prefetcher)
+        # score the prediction made for token t+1 against what actually fired
+        actual = tr.fired[t + 1]  # (L, A)
+        rec = float(np.mean([p.overlap_with(actual[p.layer]) for p in preds]))
+        recalls.append(rec)
+        bytes_total += layer_bytes
+        tps = projected_tps(rec, A)
+        if verbose and (t % max(1, T // 16) == 0 or t == T - 2):
+            print(f"  {t:>4} {rec:>8.3f} "
+                  f"{int(round(rec * A)):>4}/{A:<4} {tps:>9.2f} "
+                  f"{layer_bytes / 1024:>8.0f} KB")
     prefetcher.close()
     if not recalls:
         return AttachStats(0, 0.0, REACTIVE_TPS, 0)
@@ -163,6 +155,9 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
     recalls: list[float] = []
     bytes_total = 0
     last_token = -1
+    # predictions made after the previous token, scored when the next token's
+    # ground truth arrives (same next-token semantics as evaluate()/replay)
+    prev_preds: list[Prediction] | None = None
     print(f"xpref attach — ring={ring_path} checkpoint={checkpoint_path} "
           f"(experts={meta.num_experts} active={meta.num_active} layers={meta.num_layers})")
     try:
@@ -178,15 +173,12 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
                 rows = sorted(pending.pop(tok), key=lambda x: x["layer"])
                 logits_tok = np.stack([r["logits"] for r in rows])  # (L, E)
                 fired_tok = np.stack([r["fired"] for r in rows])  # (L, A)
-                _run_token(predictor, logits_tok, fired_tok, prefetcher, meta.num_layers)
-                preds = predictor.predict_next()
-                # recall vs this token's actual (the one we just observed as ground truth)
-                # — true next-token recall arrives when the following token completes.
-                # We score against the freshly-observed fired set as a live proxy.
-                for p in preds:
-                    if prefetcher is not None:
-                        pairs = [(p.layer, int(eid)) for eid in p.ids]
-                        bytes_total += prefetcher.prefetch_many(pairs)
+                if prev_preds is not None:
+                    hits = [p.overlap_with(fired_tok[p.layer]) for p in prev_preds]
+                    recalls.append(float(np.mean(hits)))
+                preds, hinted = _run_token(predictor, logits_tok, fired_tok, prefetcher)
+                prev_preds = preds
+                bytes_total += hinted
                 last_token = tok
                 if max_tokens and last_token + 1 >= max_tokens:
                     raise StopIteration

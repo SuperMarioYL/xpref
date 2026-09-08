@@ -70,5 +70,38 @@ class TestPredictorRecall(unittest.TestCase):
             p.predict_next()
 
 
+class TestNgramPrior(unittest.TestCase):
+    """The n-gram prior must actually contribute (v0.1 exact-set matching never fired)."""
+
+    def test_ngram_improves_recall_over_topk_only(self):
+        tr = read_trace(SAMPLE)
+        default = evaluate(tr.logits, tr.fired)
+        topk_only = evaluate(tr.logits, tr.fired, topk_weight=1.0, ngram_weight=0.0)
+        self.assertGreater(default["recall_at_k"], topk_only["recall_at_k"],
+                           "n-gram prior must add signal beyond the top-k prior")
+
+    def test_ngram_weight_zero_equals_topk_only(self):
+        tr = read_trace(SAMPLE)
+        zeroed = evaluate(tr.logits, tr.fired, topk_weight=0.6, ngram_weight=0.0)
+        topk_only = evaluate(tr.logits, tr.fired, topk_weight=1.0, ngram_weight=0.0)
+        self.assertEqual(zeroed["recall_at_k"], topk_only["recall_at_k"],
+                         "ngram_weight=0 must reduce exactly to the top-k prior")
+
+    def test_ngram_table_predicts_deterministic_followers(self):
+        """A strict alternation must be predicted from the transition table alone."""
+        num_experts, num_active = 8, 2
+        p = Predictor(num_experts=num_experts, num_active=num_active,
+                      topk_weight=0.0, ngram_weight=1.0)
+        logits = np.full((1, num_experts), -2.0, dtype=np.float32)  # flat: no top-k signal
+        seq = [np.array([[0, 1]], dtype=np.uint16),
+               np.array([[2, 3]], dtype=np.uint16)] * 3  # (0,1) <-> (2,3)
+        for fired in seq[:-1]:
+            p.observe(logits, fired)
+        preds = p.predict_next()
+        predicted = {int(x) for x in preds[0].ids}
+        self.assertEqual(predicted, {2, 3},
+                         "n-gram table must predict the followers of (0, 1)")
+
+
 if __name__ == "__main__":
     unittest.main()

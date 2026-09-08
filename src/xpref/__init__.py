@@ -17,6 +17,6 @@ from .trace import Trace, read_trace, write_trace
 try:  # pragma: no cover - resolved at runtime
     __version__ = version("xpref")
 except PackageNotFoundError:  # pragma: no cover
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 __all__ = ["Predictor", "Trace", "read_trace", "write_trace", "__version__"]

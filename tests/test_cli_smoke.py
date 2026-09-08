@@ -20,6 +20,9 @@ class TestCLISmoke(unittest.TestCase):
         result = runner.invoke(main, ["--version"])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("xpref", result.output)
+        # CLI --version must stay in lockstep with the VERSION file
+        version = (ROOT / "VERSION").read_text().strip()
+        self.assertIn(version, result.output)
 
     def test_patch_path(self):
         runner = CliRunner()

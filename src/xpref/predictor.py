@@ -48,39 +48,42 @@ class Predictor:
     ngram_n: int = 3
     topk_weight: float = 0.6
     ngram_weight: float = 0.4
-    # decay applied to the n-gram transition counts so the table tracks drift
-    _trans: list = field(default_factory=list, repr=False)
     _history_logits: list = field(default_factory=list, repr=False)
     _history_fired: list = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
-        self._trans = [defaultdict(float) for _ in range(0)]  # lazy per-layer init
-        self._per_layer_trans: list[dict] = []
+        # per-layer transition table: {source expert: {follower expert: decayed count}}
+        self._per_layer_trans: list[dict[int, dict[int, float]]] = []
 
     # ------------------------------------------------------------------ API --
     def observe(self, logits: np.ndarray, fired: np.ndarray) -> None:
         """Feed one token's ``logits`` (L, E) and ``fired`` (L, A) into history.
 
-        Also updates the per-layer n-gram transition table: every expert that
-        fired at token t-1 is recorded as a "source" whose followers we expect
-        to fire at t.
+        Also updates the per-layer transition table: every expert that fired
+        at token t-1 is a "source" whose followers we expect to fire at t.
+        Transitions are recorded per source expert (not per fired *set*) so a
+        slowly drifting hot set still produces matches.
         """
         L = logits.shape[0]
         if not self._per_layer_trans:
-            self._per_layer_trans = [defaultdict(float) for _ in range(L)]
+            self._per_layer_trans = [
+                defaultdict(lambda: defaultdict(float)) for _ in range(L)
+            ]
         self._history_logits.append(logits)
         self._history_fired.append(fired)
         if len(self._history_fired) >= 2:
             prev = self._history_fired[-2]
             cur = self._history_fired[-1]
             for layer in range(min(len(prev), len(cur), L)):
-                src = tuple(sorted(int(x) for x in prev[layer]))
                 tab = self._per_layer_trans[layer]
                 # gentle decay so the table tracks expert-set drift
-                for k in list(tab.keys()):
-                    tab[k] *= 0.98
-                for f in cur[layer]:
-                    tab[src + (int(f),)] += 1.0
+                for followers in tab.values():
+                    for f in followers:
+                        followers[f] *= 0.98
+                for e in prev[layer]:
+                    followers = tab[int(e)]
+                    for f in cur[layer]:
+                        followers[int(f)] += 1.0
         # bound history
         self._history_logits = self._history_logits[-self.ngram_n - 1 :]
         self._history_fired = self._history_fired[-self.ngram_n - 1 :]
@@ -100,14 +103,32 @@ class Predictor:
             w = np.exp(latest)
             w = w / w.sum()
             scores += self.topk_weight * w.astype(np.float32)
-            # --- n-gram prior: followers of the most recent fired set
-            if self._history_fired:
-                src = tuple(sorted(int(x) for x in self._history_fired[-1][layer]))
-                tab = self._per_layer_trans[layer] if layer < len(self._per_layer_trans) else {}
-                for key, cnt in tab.items():
-                    if len(key) > 0 and key[: len(src)] == src:
-                        eid = key[-1]
-                        scores[eid] += self.ngram_weight * cnt
+            # --- n-gram prior: followers of the most recent fired experts.
+            # Each recently-fired expert votes a normalized follower
+            # distribution; votes are averaged over the sources so the total
+            # n-gram mass stays <= ngram_weight and the two priors remain
+            # score-commensurate (the weights act as a real blend).
+            if self._history_fired and self.ngram_weight > 0:
+                tab = (
+                    self._per_layer_trans[layer]
+                    if layer < len(self._per_layer_trans)
+                    else {}
+                )
+                last = [int(x) for x in self._history_fired[-1][layer]]
+                votes: dict[int, float] = defaultdict(float)
+                for e in last:
+                    followers = tab.get(e)
+                    if not followers:
+                        continue
+                    tot = sum(followers.values())
+                    if tot <= 0:
+                        continue
+                    for f, cnt in followers.items():
+                        votes[f] += cnt / tot
+                if votes and last:
+                    scale = self.ngram_weight / len(last)
+                    for f, v in votes.items():
+                        scores[f] += scale * v
             order = np.argsort(scores)[::-1][:K]
             top_scores = scores[order]
             preds.append(
