@@ -9,7 +9,7 @@ this writes one record per (token, layer) into a shared ring file that
 `xpref attach` consumes to predict and pre-stage the next-firing experts.
 
 Ring protocol (must match src/xpref/ringbuf.py):
-  header (40 bytes, little-endian):
+  header (44 bytes, little-endian):
     magic      : 8 bytes  = "XPRFRING"
     version    : uint32  = 1
     num_experts: uint32  (e.g. 896 for Kimi K3)
@@ -87,7 +87,7 @@ index 3333333..4444444 100644
 +#endif
 +    uint32_t capacity = 256;
 +    size_t rec = 4 + 4 + num_experts * 4 + num_active * 2;  // token, layer, logits, fired
-+    size_t total = 40 + (size_t)capacity * rec;             // 40-byte header
++    size_t total = 44 + (size_t)capacity * rec;             // 44-byte header
 +    int fd = ::open(path.c_str(), O_RDWR, 0600);
 +    if (fd < 0) {  // producer may also be the creator
 +        fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
@@ -122,9 +122,9 @@ index 3333333..4444444 100644
 +                              const float * logits, const uint16_t * fired) {
 +    if (!r.xpref_ring) return;
 +    size_t rec = 4 + 4 + (size_t)r.xpref_num_experts * 4 + (size_t)r.xpref_num_active * 2;
-+    size_t total = 40 + (size_t)r.xpref_capacity * rec;
++    size_t total = 44 + (size_t)r.xpref_capacity * rec;
 +    uint64_t head = r.xpref_head;
-+    char * base = (char*)r.xpref_ring + 40;
++    char * base = (char*)r.xpref_ring + 44;
 +    char * slot = base + (size_t)(head % r.xpref_capacity) * rec;
 +    std::memcpy(slot + 0, &token_idx, 4);
 +    std::memcpy(slot + 4, &layer, 4);

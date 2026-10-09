@@ -106,22 +106,32 @@ class Prefetcher:
     def prefetch(self, layer: int, expert_id: int) -> tuple[int, int]:
         """Hint the kernel to readahead expert ``(layer, expert_id)``.
 
-        Returns ``(offset, length)`` actually hinted (``(0,0)`` if no-op).
-        Prefetch is advisory and must never raise — a failure here degrades to
-        a no-op so the decode loop is unaffected.
+        Returns the ``(offset, length)`` actually hinted — page-rounded, since
+        ``madvise(2)`` requires a page-aligned address (Linux returns EINVAL
+        for arbitrary offsets, which would silently drop every hint) — or
+        ``(0, 0)`` if no-op. Prefetch is advisory and must never raise — a
+        failure here degrades to a no-op so the decode loop is unaffected.
         """
         try:
             offset, length = self.layout.range_of(layer, expert_id)
             if length == 0 or self._mm is None or self._libc is None:
                 return (0, 0)
             end = min(offset + length, len(self._mm))
-            length = max(0, end - offset)
-            if length == 0:
+            if end <= offset:
                 return (0, 0)
-            addr = ctypes.c_void_p(self._base_addr() + offset)
+            # Round the start down to the page boundary and extend through the
+            # page end containing the expert range: the hint may cover a few
+            # adjacent bytes, which is harmless for a WILLNEED readahead, and
+            # the returned pair reports what the kernel was actually advised on.
+            page = mmap.PAGESIZE
+            start = (offset // page) * page
+            length = min((end + page - 1) // page * page, len(self._mm)) - start
+            if length <= 0:
+                return (0, 0)
+            addr = ctypes.c_void_p(self._base_addr() + start)
             rc = self._libc.madvise(addr, ctypes.c_size_t(length),
                                     ctypes.c_int(MADV_WILLNEED))
-            return (offset, length) if rc == 0 else (0, 0)
+            return (start, length) if rc == 0 else (0, 0)
         except (OSError, ValueError, TypeError):
             return (0, 0)
 

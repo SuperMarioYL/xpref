@@ -20,6 +20,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+# per-observe decay factor applied to transition counts (gentle drift tracking)
+_DECAY = 0.98
+
 
 @dataclass
 class Prediction:
@@ -52,8 +55,10 @@ class Predictor:
     _history_fired: list = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
-        # per-layer transition table: {source expert: {follower expert: decayed count}}
-        self._per_layer_trans: list[dict[int, dict[int, float]]] = []
+        # per-layer transition table: {source expert: {follower expert: [count, last_touch]}}
+        # counts decay lazily — effective(count, last_touch, now) = count * _DECAY**(now - last_touch)
+        self._per_layer_trans: list[dict[int, dict[int, list]]] = []
+        self._t = 0  # observe clock driving the lazy decay
 
     # ------------------------------------------------------------------ API --
     def observe(self, logits: np.ndarray, fired: np.ndarray) -> None:
@@ -63,27 +68,33 @@ class Predictor:
         at token t-1 is a "source" whose followers we expect to fire at t.
         Transitions are recorded per source expert (not per fired *set*) so a
         slowly drifting hot set still produces matches.
+
+        Decay is applied lazily — each entry stores its raw count and the
+        clock it was last touched at, and the decay factor is folded in on
+        touch/read. This keeps observe() O(num_active) per token instead of
+        sweeping the whole table (which grew with the number of distinct
+        transitions ever seen) while leaving the decay math unchanged.
         """
         L = logits.shape[0]
         if not self._per_layer_trans:
             self._per_layer_trans = [
-                defaultdict(lambda: defaultdict(float)) for _ in range(L)
+                defaultdict(lambda: defaultdict(lambda: [0.0, 0])) for _ in range(L)
             ]
         self._history_logits.append(logits)
         self._history_fired.append(fired)
+        self._t += 1
         if len(self._history_fired) >= 2:
             prev = self._history_fired[-2]
             cur = self._history_fired[-1]
+            now = self._t
             for layer in range(min(len(prev), len(cur), L)):
                 tab = self._per_layer_trans[layer]
-                # gentle decay so the table tracks expert-set drift
-                for followers in tab.values():
-                    for f in followers:
-                        followers[f] *= 0.98
                 for e in prev[layer]:
                     followers = tab[int(e)]
                     for f in cur[layer]:
-                        followers[int(f)] += 1.0
+                        entry = followers[int(f)]
+                        entry[0] = entry[0] * _DECAY ** (now - entry[1]) + 1.0
+                        entry[1] = now
         # bound history
         self._history_logits = self._history_logits[-self.ngram_n - 1 :]
         self._history_fired = self._history_fired[-self.ngram_n - 1 :]
@@ -115,16 +126,22 @@ class Predictor:
                     else {}
                 )
                 last = [int(x) for x in self._history_fired[-1][layer]]
+                now = self._t
                 votes: dict[int, float] = defaultdict(float)
                 for e in last:
                     followers = tab.get(e)
                     if not followers:
                         continue
-                    tot = sum(followers.values())
+                    # decay is folded in on read (lazy — see observe())
+                    eff = {
+                        f: c * _DECAY ** (now - t0)
+                        for f, (c, t0) in followers.items()
+                    }
+                    tot = sum(eff.values())
                     if tot <= 0:
                         continue
-                    for f, cnt in followers.items():
-                        votes[f] += cnt / tot
+                    for f, v in eff.items():
+                        votes[f] += v / tot
                 if votes and last:
                     scale = self.ngram_weight / len(last)
                     for f, v in votes.items():

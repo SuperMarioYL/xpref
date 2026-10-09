@@ -1,11 +1,8 @@
 """Attach-path tests: live ring recall + single-pass prefetch accounting.
 
-Regression tests for the v0.2.0 attach fixes:
-
-* ``live_attach`` must actually measure next-token recall (it used to leave
-  its ``recalls`` list empty and always report recall=0.000 / 4 t/s).
-* replay/live must run exactly one predict + prefetch pass per token (they
-  used to predict and ``prefetch_many`` twice per token).
+Regression tests for the previous release's attach fixes (live recall was
+always 0.000, prediction/prefetch ran twice per token) plus the v0.3.0
+mid-stream sync fix.
 """
 
 from __future__ import annotations
@@ -13,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -108,6 +106,58 @@ class TestSinglePassPrefetch(unittest.TestCase):
         # (token, layer) pairs — one prediction per layer per scored token
         self.assertEqual(stats.tokens_seen, tr.num_tokens - 1)
         self.assertEqual(offline["predictions_made"], stats.tokens_seen * tr.num_layers)
+        self.assertAlmostEqual(stats.recall, offline["recall_at_k"], places=6)
+
+
+class TestMidStreamSync(unittest.TestCase):
+    def test_live_attach_syncs_to_midstream_ring(self):
+        """v0.3.0 regression: attaching after the engine already produced tokens
+        used to wait forever for token 0 (the ring file persists across runs),
+        so live_attach spun in its poll loop and never returned."""
+        tr = read_trace(SAMPLE)
+        with tempfile.TemporaryDirectory() as td:
+            ring_path = str(Path(td) / "ring.xring")
+            ckpt = _fake_checkpoint(td)
+            with RingBuffer(ring_path, create=True, num_experts=tr.num_experts,
+                            num_active=tr.num_active, num_layers=tr.num_layers,
+                            capacity=256) as rb:
+                for t in range(5, 21):  # engine already mid-stream: tokens 5..20
+                    for lay in range(tr.num_layers):
+                        rb.write_record(t, lay, tr.logits[t, lay], tr.fired[t, lay])
+            result: dict = {}
+
+            def run():
+                with contextlib.redirect_stdout(io.StringIO()):
+                    result["stats"] = live_attach(ring_path, str(ckpt),
+                                                  max_tokens=8, poll_interval=0.001)
+
+            th = threading.Thread(target=run, daemon=True)
+            th.start()
+            th.join(timeout=30)
+            self.assertFalse(th.is_alive(),
+                             "live_attach hung on a mid-stream ring (waited for token 0)")
+        stats = result["stats"]
+        self.assertEqual(stats.tokens_seen, 8)
+        self.assertGreater(stats.recall, 0.5)
+        self.assertGreater(stats.projected_tps, REACTIVE_TPS)
+
+    def test_live_attach_fresh_ring_recall_matches_offline_scoring(self):
+        """The sync path must not disturb attach-from-token-0 semantics."""
+        tr = read_trace(SAMPLE)
+        n_live = 16
+        with tempfile.TemporaryDirectory() as td:
+            ring_path = str(Path(td) / "ring.xring")
+            ckpt = _fake_checkpoint(td)
+            with RingBuffer(ring_path, create=True, num_experts=tr.num_experts,
+                            num_active=tr.num_active, num_layers=tr.num_layers,
+                            capacity=256) as rb:
+                for t in range(n_live):
+                    for lay in range(tr.num_layers):
+                        rb.write_record(t, lay, tr.logits[t, lay], tr.fired[t, lay])
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = live_attach(ring_path, str(ckpt), max_tokens=8)
+        offline = evaluate(tr.logits[:8], tr.fired[:8])
+        self.assertEqual(stats.tokens_seen, 8)
         self.assertAlmostEqual(stats.recall, offline["recall_at_k"], places=6)
 
 

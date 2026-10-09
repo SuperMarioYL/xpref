@@ -139,7 +139,9 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
                 max_tokens: int | None = None,
                 poll_interval: float = 0.05) -> AttachStats:
     """Attach to a live ring the patched engine is writing. Blocks until interrupted
-    or ``max_tokens`` tokens complete."""
+    or ``max_tokens`` tokens complete. If the engine is already mid-stream (the ring
+    file persists across runs), attach syncs to the earliest complete token present
+    and scores from there."""
     ring = RingBuffer(ring_path, create=False)
     meta = ring.meta
     assert meta is not None
@@ -155,6 +157,7 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
     recalls: list[float] = []
     bytes_total = 0
     last_token = -1
+    processed = 0
     # predictions made after the previous token, scored when the next token's
     # ground truth arrives (same next-token semantics as evaluate()/replay)
     prev_preds: list[Prediction] | None = None
@@ -168,6 +171,19 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
             # process complete tokens in order
             while True:
                 tok = last_token + 1
+                if last_token < 0:
+                    # First sync: the engine may already be mid-stream when we
+                    # attach (the ring file persists across producer/consumer
+                    # lifetimes), so token 0 may never arrive. Skip to the
+                    # earliest complete token actually present instead of
+                    # waiting forever; drop the older partial state.
+                    complete = [t for t, rows in pending.items()
+                                if len(rows) >= meta.num_layers]
+                    if not complete:
+                        break
+                    tok = min(complete)
+                    for stale in [t for t in pending if t < tok]:
+                        del pending[stale]
                 if tok not in pending or len(pending[tok]) < meta.num_layers:
                     break
                 rows = sorted(pending.pop(tok), key=lambda x: x["layer"])
@@ -180,7 +196,8 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
                 prev_preds = preds
                 bytes_total += hinted
                 last_token = tok
-                if max_tokens and last_token + 1 >= max_tokens:
+                processed += 1
+                if max_tokens and processed >= max_tokens:
                     raise StopIteration
             time.sleep(poll_interval)
     except (KeyboardInterrupt, StopIteration):
@@ -190,7 +207,7 @@ def live_attach(ring_path: str | Path, checkpoint_path: str | Path,
         prefetcher.close()
     mean_recall = float(np.mean(recalls)) if recalls else 0.0
     return AttachStats(
-        tokens_seen=last_token + 1,
+        tokens_seen=processed,
         recall=mean_recall,
         projected_tps=projected_tps(mean_recall, meta.num_active) if recalls else REACTIVE_TPS,
         bytes_prefetched=bytes_total,

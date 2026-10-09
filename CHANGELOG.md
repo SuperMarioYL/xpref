@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
+### Fixed
+- The bundled llama.cpp patch and the Python consumer disagreed on the ring
+  layout: the patch documented a 40-byte header and mapped records from offset
+  40, while `xpref/ringbuf.py` reads records from offset 44 (magic + 5 x uint32
+  + head/tail uint64 sum to 44). Any live attach against a real patched engine
+  crashed at startup with `ValueError("buffer is smaller than requested
+  size")`. The patch now sizes and maps records from the 44-byte header the
+  consumer already implements.
+- `xpref attach --ring` could never attach to an engine that was already
+  mid-stream: the consumer waited for token 0, which never arrives once the
+  producer has moved on (the ring file persists across runs by design), so
+  live attach spun in its poll loop forever. Live attach now syncs to the
+  earliest complete token present in the ring and scores from there; attach
+  on a fresh ring behaves exactly as before.
+- Prefetch hints were silently dropped on Linux for any expert range that was
+  not page-aligned: `madvise(2)` requires a page-aligned address and returns
+  EINVAL otherwise, and the default uniform layout produces arbitrary offsets
+  (36-byte experts on the shipped 896-expert sample geometry), so on Linux
+  every hint failed and `bytes_prefetched` stayed 0 while the run looked
+  successful. Hint addresses are now rounded down to the page boundary and
+  extended through the page end; the reported offset/length is the
+  page-rounded range actually advised, for arbitrary layouts on both Linux
+  and macOS.
+
+### Changed
+- The predictor's transition-table decay is applied lazily (each entry stores
+  its raw count and last-touched token; the decay factor folds in on touch and
+  read) instead of sweeping the whole table on every observed token. The decay
+  math is unchanged; observe() is now O(active experts) per token regardless
+  of how many transitions the table has accumulated. Sample-trace recall@16 is
+  unchanged (0.8154).
+- Version bumped to 0.3.0 across all surfaces; web/site.json's embedded demo
+  output was regenerated from the current command (it still quoted the
+  pre-0.2.0 recall 0.7405 while the code produces 0.8154).
+
+### Notes
+- VRAM / CUDA host-pinned staging, a learned predictor, and vLLM/SGLang
+  integration remain out of scope (they require GPU-rig / fork-build
+  validation this release does not have).
+
 ## [0.2.0] - 2026-09-09
 
 ### Fixed
@@ -67,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   learned predictor are v0.2. Only the llama.cpp kimi-k3 fork is supported;
   vLLM/SGLang integration is v0.3. Linux + macOS only (Windows is v0.3+).
 
-[Unreleased]: https://github.com/SuperMarioYL/xpref/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/SuperMarioYL/xpref/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.1.0

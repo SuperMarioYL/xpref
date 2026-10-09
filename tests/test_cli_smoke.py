@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,12 @@ class TestCLISmoke(unittest.TestCase):
         # CLI --version must stay in lockstep with the VERSION file
         version = (ROOT / "VERSION").read_text().strip()
         self.assertIn(version, result.output)
+        # ...and with pyproject.toml [project].version (single source of truth
+        # for the release workflow's wheel)
+        pyproject = (ROOT / "pyproject.toml").read_text()
+        match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M)
+        self.assertIsNotNone(match, "pyproject.toml [project].version not found")
+        self.assertEqual(match.group(1), version)
 
     def test_patch_path(self):
         runner = CliRunner()
