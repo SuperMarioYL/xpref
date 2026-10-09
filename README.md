@@ -52,7 +52,7 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-支持 Python 3.10+，此处安装使用 3.12。示例评估完整 128-token 合成轨迹，并提示一个页对齐的合成文件区间。
+支持 Python 3.10+，此处安装使用 3.12。示例评估完整 128-token 合成轨迹，并提示一个按页取整的合成文件区间（madvise 按页工作，提示数字取决于宿主页大小）。
 
 ```bash
 .venv/bin/python examples/presentation_demo.py
@@ -93,7 +93,7 @@ Synthetic trace evaluation; t/s fields are formula projections:
   "projected_predictive_tps": 12.0,
   "speedup": 3.0
 }
-{"synthetic_checkpoint_bytes": 16384, "hint_api_available": true, "hinted_offset": 4096, "hinted_bytes": 4096}
+{"synthetic_checkpoint_bytes": 16384, "hint_api_available": true, "hinted_offset": 0, "hinted_bytes": 16384}
 ```
 
 完整命令与输出保存在 [docs/demo-results.json](./docs/demo-results.json). 输入和复现代码均随仓提供。

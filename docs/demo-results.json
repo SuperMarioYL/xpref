@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "source_revision": "43ea892dc09e5f51b622456181d3e919e4c4edbe",
-  "scope": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
+  "source_revision": "0b15b071d826dfe821cf0f05ea4f35a2d9f99864",
+  "scope": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. The advised range is page-rounded (madvise works on pages), so the exact hint numbers depend on the host page size — this run is from a 16K-page host. Projected throughput is not measured inference speed.",
   "steps": [
     {
       "label": "Recorded run",
-      "body": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. Projected throughput is not measured inference speed.",
+      "body": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. The advised range is page-rounded (madvise works on pages), so the exact hint numbers depend on the host page size — this run is from a 16K-page host. Projected throughput is not measured inference speed.",
       "command": ".venv/bin/python examples/presentation_demo.py",
-      "output": "Synthetic trace evaluation; t/s fields are formula projections:\n{\n  \"num_tokens\": 128,\n  \"num_layers\": 8,\n  \"num_experts\": 896,\n  \"num_active\": 16,\n  \"recall_at_k\": 0.8153912401574803,\n  \"recall_at_16\": 0.8153912401574803,\n  \"per_layer_recall\": [\n    0.8208661417322834,\n    0.8095472440944882,\n    0.8115157480314961,\n    0.8188976377952756,\n    0.8125,\n    0.8154527559055118,\n    0.8184055118110236,\n    0.8159448818897638\n  ],\n  \"predictions_made\": 1016,\n  \"reactive_tps\": 4.0,\n  \"projected_predictive_tps\": 12.0,\n  \"speedup\": 3.0\n}\n{\"synthetic_checkpoint_bytes\": 16384, \"hint_api_available\": true, \"hinted_offset\": 4096, \"hinted_bytes\": 4096}"
+      "output": "Synthetic trace evaluation; t/s fields are formula projections:\n{\n  \"num_tokens\": 128,\n  \"num_layers\": 8,\n  \"num_experts\": 896,\n  \"num_active\": 16,\n  \"recall_at_k\": 0.8153912401574803,\n  \"recall_at_16\": 0.8153912401574803,\n  \"per_layer_recall\": [\n    0.8208661417322834,\n    0.8095472440944882,\n    0.8115157480314961,\n    0.8188976377952756,\n    0.8125,\n    0.8154527559055118,\n    0.8184055118110236,\n    0.8159448818897638\n  ],\n  \"predictions_made\": 1016,\n  \"reactive_tps\": 4.0,\n  \"projected_predictive_tps\": 12.0,\n  \"speedup\": 3.0\n}\n{\"synthetic_checkpoint_bytes\": 16384, \"hint_api_available\": true, \"hinted_offset\": 0, \"hinted_bytes\": 16384}"
     }
   ]
 }

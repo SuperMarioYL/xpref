@@ -52,7 +52,7 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Python 3.10+; the shown installation uses 3.12. The demo evaluates the complete 128-token synthetic trace and hints one page-aligned synthetic file range.
+Python 3.10+; the shown installation uses 3.12. The demo evaluates the complete 128-token synthetic trace and hints one page-rounded synthetic file range (madvise works on pages, so the advised numbers depend on the host page size).
 
 ```bash
 .venv/bin/python examples/presentation_demo.py
@@ -93,7 +93,7 @@ Synthetic trace evaluation; t/s fields are formula projections:
   "projected_predictive_tps": 12.0,
   "speedup": 3.0
 }
-{"synthetic_checkpoint_bytes": 16384, "hint_api_available": true, "hinted_offset": 4096, "hinted_bytes": 4096}
+{"synthetic_checkpoint_bytes": 16384, "hint_api_available": true, "hinted_offset": 0, "hinted_bytes": 16384}
 ```
 
 The complete command and output are recorded in [docs/demo-results.json](./docs/demo-results.json). Inputs and reproduction code are included in the repository.
