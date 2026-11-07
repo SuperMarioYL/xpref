@@ -74,9 +74,13 @@ def eval(trace: str, ngram_n: int, topk_weight: float, ngram_weight: float,
     """Score the predictor on a trace; print recall@16 + projected t/s."""
     if trace is None:
         trace = str(_bundled_sample())
-    tr = read_trace(trace)
-    res = evaluate(tr.logits, tr.fired, ngram_n=ngram_n, topk_weight=topk_weight,
-                   ngram_weight=ngram_weight)
+    try:
+        tr = read_trace(trace)
+        res = evaluate(tr.logits, tr.fired, ngram_n=ngram_n, topk_weight=topk_weight,
+                       ngram_weight=ngram_weight)
+    except (OSError, ValueError) as exc:
+        # bad trace or out-of-range predictor parameter — report it, not a traceback
+        raise click.ClickException(str(exc)) from exc
     tps = projected_tps(res["recall_at_k"], res["num_active"])
     out = {
         **res,
@@ -117,9 +121,12 @@ def attach(ring, replay, checkpoint, layout, ngram_n, topk_weight, ngram_weight,
     if replay is None and ring is None:
         replay = str(_bundled_sample())  # default: replay the shipped sample
     if replay is not None:
-        stats = replay_attach(replay, checkpoint, ngram_n=ngram_n,
-                              topk_weight=topk_weight, ngram_weight=ngram_weight,
-                              layout=layout, verbose=True)
+        try:
+            stats = replay_attach(replay, checkpoint, ngram_n=ngram_n,
+                                  topk_weight=topk_weight, ngram_weight=ngram_weight,
+                                  layout=layout, verbose=True)
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
         click.echo(f"\nreplay done: tokens={stats.tokens_seen} recall={stats.recall:.3f} "
                    f"proj t/s={stats.projected_tps:.2f} "
                    f"prefetched={stats.bytes_prefetched} bytes")
@@ -128,9 +135,12 @@ def attach(ring, replay, checkpoint, layout, ngram_n, topk_weight, ngram_weight,
         raise click.UsageError("attach needs --ring (live) or --replay (offline).")
     from .ringbuf import default_ring_path
     ring_path = ring if "/" in ring or "\\" in ring else str(default_ring_path(ring))
-    stats = live_attach(ring_path, checkpoint, ngram_n=ngram_n,
-                        topk_weight=topk_weight, ngram_weight=ngram_weight,
-                        layout=layout, max_tokens=max_tokens)
+    try:
+        stats = live_attach(ring_path, checkpoint, ngram_n=ngram_n,
+                            topk_weight=topk_weight, ngram_weight=ngram_weight,
+                            layout=layout, max_tokens=max_tokens)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"\nlive attach: tokens={stats.tokens_seen} recall={stats.recall:.3f} "
                f"proj t/s={stats.projected_tps:.2f}")
 
@@ -145,7 +155,10 @@ def patch_path() -> None:
 @click.option("--trace", required=True, type=click.Path(exists=True, dir_okay=False))
 def trace_info(trace: str) -> None:
     """Print a trace's metadata."""
-    tr = read_trace(trace)
+    try:
+        tr = read_trace(trace)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(tr.summary(), indent=2))
 
 

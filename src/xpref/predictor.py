@@ -15,6 +15,7 @@ A learned predictor (MLP/transformer) is explicitly out of scope for v0.1.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -22,6 +23,25 @@ import numpy as np
 
 # per-observe decay factor applied to transition counts (gentle drift tracking)
 _DECAY = 0.98
+
+
+def _validate_params(ngram_n: int, topk_weight: float, ngram_weight: float) -> None:
+    """Reject values that would silently disable or invert the predictor.
+
+    A NaN weight makes every score NaN, so ``argsort`` returns arbitrary ids; a
+    negative weight turns a prior into an anti-prior; both zero leaves no signal
+    at all. ``ngram_n < 1`` makes the history slice at ``observe()`` unbounded
+    (``-(-1) - 1 == 0``), so a long live attach grows without limit instead of
+    failing. Fail loudly here rather than reporting a plausible-looking recall.
+    """
+    if ngram_n < 1:
+        raise ValueError(f"ngram_n must be >= 1, got {ngram_n}")
+    for name, value in (("topk_weight", topk_weight), ("ngram_weight", ngram_weight)):
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and non-negative, got {value!r}")
+    if topk_weight + ngram_weight <= 0:
+        raise ValueError("topk_weight + ngram_weight must be > 0")
+
 
 
 @dataclass
@@ -55,6 +75,7 @@ class Predictor:
     _history_fired: list = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
+        _validate_params(self.ngram_n, self.topk_weight, self.ngram_weight)
         # per-layer transition table: {source expert: {follower expert: [count, last_touch]}}
         # counts decay lazily — effective(count, last_touch, now) = count * _DECAY**(now - last_touch)
         self._per_layer_trans: list[dict[int, dict[int, list]]] = []

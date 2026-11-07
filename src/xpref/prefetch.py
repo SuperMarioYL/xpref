@@ -56,7 +56,11 @@ class ExpertLayout:
     @classmethod
     def from_json(cls, path: str | Path, num_layers: int, num_experts: int,
                   file_size: int) -> ExpertLayout:
-        raw = json.loads(Path(path).read_text())
+        try:
+            raw = json.loads(Path(path).read_text())
+        except json.JSONDecodeError as exc:
+            # name the file: the bare decoder message says nothing about --layout
+            raise ValueError(f"layout {path}: {exc}") from exc
         table: dict[tuple[int, int], tuple[int, int]] = {}
         for lstr, inner in raw.items():
             layer = int(lstr)
@@ -74,6 +78,8 @@ class Prefetcher:
             raise FileNotFoundError(f"checkpoint not found: {self.checkpoint}")
         self.layout = layout
         self._fh = self.checkpoint.open("rb")
+        # pages already advised by this instance — see prefetch_many()
+        self._advised: set[int] = set()
         # ACCESS_COPY maps a private copy-on-write view: read-only backing,
         # but a *writable* buffer so ctypes.from_buffer can hand its address to
         # madvise. madvise(MADV_WILLNEED) on a COW mapping still hints the
@@ -136,11 +142,26 @@ class Prefetcher:
             return (0, 0)
 
     def prefetch_many(self, pairs: list[tuple[int, int]]) -> int:
-        """Prefetch a set of ``(layer, expert_id)``; return total bytes hinted."""
+        """Prefetch a set of ``(layer, expert_id)``; return newly covered bytes.
+
+        Hints overlap by construction: :meth:`prefetch` rounds every range out to
+        its pages, so all experts sharing a page report that whole page. Summing
+        the per-hint lengths therefore counts the same page once per prediction —
+        a 16 KiB checkpoint reported 266 MB over the 128-token sample. Only pages
+        this instance has not advised yet contribute, which bounds the total over
+        a run by the checkpoint size.
+        """
         total = 0
+        page = mmap.PAGESIZE
         for layer, eid in pairs:
-            _, n = self.prefetch(layer, eid)
-            total += n
+            start, length = self.prefetch(layer, eid)
+            if length <= 0 or self._mm is None:
+                continue
+            for p in range(start // page, (start + length - 1) // page + 1):
+                if p in self._advised:
+                    continue
+                self._advised.add(p)
+                total += min(page, len(self._mm) - p * page)
         return total
 
     def close(self) -> None:

@@ -103,6 +103,42 @@ class TestNgramPrior(unittest.TestCase):
                          "n-gram table must predict the followers of (0, 1)")
 
 
+class TestParamValidation(unittest.TestCase):
+    """v0.4.0: values that invert the gate or unbound history must be rejected.
+
+    Previously a NaN weight made every score NaN (arbitrary argsort order), a
+    negative weight turned a prior into an anti-prior, and ngram_n=-1 left the
+    history slice at [0:] so a long live attach grew without limit -- all silent.
+    """
+
+    def test_rejects_non_finite_and_negative_weights(self):
+        for kwargs in ({"topk_weight": float("nan")},
+                       {"ngram_weight": float("inf")},
+                       {"topk_weight": -0.1},
+                       {"ngram_weight": -1.0},
+                       {"topk_weight": 0.0, "ngram_weight": 0.0}):
+            with self.assertRaises(ValueError, msg=kwargs):
+                Predictor(num_experts=32, num_active=4, **kwargs)
+
+    def test_rejects_ngram_n_below_one(self):
+        for n in (0, -1):
+            with self.assertRaises(ValueError, msg=n):
+                Predictor(num_experts=32, num_active=4, ngram_n=n)
+
+    def test_history_is_bounded(self):
+        p = Predictor(num_experts=32, num_active=4, ngram_n=3)
+        logits = np.zeros((1, 32), dtype=np.float32)
+        fired = np.array([[0, 1, 2, 3]], dtype=np.uint16)
+        for _ in range(50):
+            p.observe(logits, fired)
+        self.assertEqual(len(p._history_logits), 4)
+
+    def test_evaluate_applies_the_same_contract(self):
+        logits, fired = _tiny_trace(tokens=4)
+        with self.assertRaises(ValueError):
+            evaluate(logits, fired, topk_weight=float("nan"))
+
+
 class TestLazyDecay(unittest.TestCase):
     """v0.3.0: transition decay is folded in lazily on touch/read.
 

@@ -108,6 +108,30 @@ class TestSinglePassPrefetch(unittest.TestCase):
         self.assertEqual(offline["predictions_made"], stats.tokens_seen * tr.num_layers)
         self.assertAlmostEqual(stats.recall, offline["recall_at_k"], places=6)
 
+    def test_prefetch_bytes_bounded_by_checkpoint_size(self):
+        """v0.4.0: page-rounded hints must not be counted once per prediction.
+
+        Summing every hint length reported 266338304 bytes for any checkpoint
+        size (16256 hints x the 16384-byte page), i.e. 16256x a 16 KiB file.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            ckpt = Path(td) / "tiny.gguf"
+            ckpt.write_bytes(b"\0" * 16384)  # one page on the 16K-page sample host
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = replay_attach(SAMPLE, str(ckpt), verbose=False)
+            # every expert maps inside this single file, so the whole file is
+            # advised exactly once regardless of the host page size
+            self.assertEqual(stats.bytes_prefetched, 16384)
+
+        for size in (CKPT_BYTES, 1024 * 1024 + 7):
+            with tempfile.TemporaryDirectory() as td:
+                ckpt = Path(td) / "c.gguf"
+                ckpt.write_bytes(b"\0" * size)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    stats = replay_attach(SAMPLE, str(ckpt), verbose=False)
+                self.assertGreater(stats.bytes_prefetched, 0)
+                self.assertLessEqual(stats.bytes_prefetched, size)
+
 
 class TestMidStreamSync(unittest.TestCase):
     def test_live_attach_syncs_to_midstream_ring(self):

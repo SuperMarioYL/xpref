@@ -16,8 +16,9 @@ Enter
 Sleep 3s
 
 # replay the decode loop: per-token recall + projected 4→12 t/s curve
+# (`--replay` takes a path; the no-flag form replays the bundled sample)
 Type "truncate -s 256k /tmp/ckpt.gguf"
 Enter
-Type "xpref attach --replay --checkpoint /tmp/ckpt.gguf"
+Type "xpref attach --checkpoint /tmp/ckpt.gguf"
 Enter
 Sleep 5s

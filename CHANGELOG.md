@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
+### Fixed
+- `docs/demo.tape` recorded `xpref attach --replay --checkpoint ...`, an invalid
+  form: `--replay` takes a path, so click consumed the literal `--checkpoint` as
+  its value and the command exited 2 before doing anything. This is the same
+  defect the v0.2.0 release fixed in `examples/quickstart.sh`; the tape — the
+  canonical re-render path for `assets/demo.gif`, run verbatim by the `demo`
+  workflow — was missed. It now uses the working no-flag form.
+- `scripts/gen_demo_gif.py` still rendered a pre-v0.2.0 terminal capture:
+  `recall@16 = 0.7405`, top-k-era per-layer numbers and
+  `prefetched=585216 bytes`. The canned block is regenerated from the current
+  command output.
+- `--topk-weight`, `--ngram-weight` and `--ngram-n` accepted any value. A NaN
+  weight made every score NaN (arbitrary `argsort` order), a negative weight
+  turned a prior into an anti-prior, both zero left no signal, and `--ngram-n -1`
+  made the retained history unbounded — all while exiting 0 and printing a
+  plausible-looking recall. Predictor construction now rejects non-finite or
+  negative weights, a zero total weight, and `ngram_n < 1`.
+- `bytes_prefetched` summed every page-rounded hint, so every expert sharing a
+  page counted that whole page again: a 16 KiB checkpoint reported 266,338,304
+  bytes after the 128-token replay. It now reports only pages not already
+  advised, bounded by the checkpoint size (16,384 for that checkpoint).
+- A bad trace, a truncated trace, a missing ring, or malformed `--layout` JSON
+  raised a raw interpreter traceback. The CLI now reports `Error: <message>` and
+  exits 1; unexpected errors keep their traceback.
+
+### Changed
+- Version bumped to 0.4.0 across all surfaces; the lockstep regression test now
+  also asserts the newest CHANGELOG heading and `web/site.json`
+  `meta.content_version` agree with `VERSION`.
+
 ## [0.3.0] - 2026-10-10
 
 ### Fixed
@@ -109,7 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   learned predictor are v0.2. Only the llama.cpp kimi-k3 fork is supported;
   vLLM/SGLang integration is v0.3. Linux + macOS only (Windows is v0.3+).
 
-[Unreleased]: https://github.com/SuperMarioYL/xpref/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SuperMarioYL/xpref/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.4.0
 [0.3.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SuperMarioYL/xpref/releases/tag/v0.1.0

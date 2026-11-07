@@ -116,7 +116,7 @@ xpref attach --ring /path/to/router.xring --checkpoint /path/to/weights.gguf --l
 
 ## 配置
 
-eval 支持 --ngram-n（3）、--topk-weight（0.6）、--ngram-weight（0.4）。attach 要求 --checkpoint，并选择 --replay 或 --ring；裸 ring 名在平台共享内存/临时目录解析。--layout 使用 JSON {layer: {expert_id: [offset, length]}}。patch-path 定位参考 patch 供检查；真实集成评估须独立测量引擎吞吐。
+eval 支持 --ngram-n（3）、--topk-weight（0.6）、--ngram-weight（0.4）。权重须为有限非负值且不能同时为 0，--ngram-n 须 ≥ 1。attach 要求 --checkpoint，并选择 --replay 或 --ring；裸 ring 名在平台共享内存/临时目录解析。--layout 使用 JSON {layer: {expert_id: [offset, length]}}。patch-path 定位参考 patch 供检查；真实集成评估须独立测量引擎吞吐。
 
 ## 集成与职责分工
 
@@ -140,7 +140,7 @@ eval 支持 --ngram-n（3）、--topk-weight（0.6）、--ngram-weight（0.4）�
 ## 限制与后续方向
 
 - 随仓带 K3 标签的轨迹由 scripts/gen_sample_trace.py 合成，其召回不代表实测模型准确率；4/12 t/s 是写入代码的投影假设，不是硬件实测。
-- MADV_WILLNEED 只是建议；提示字节数不证明磁盘读取、驻留或吞吐提升。均匀布局只是合成近似，真实权重需核实字节区间。
+- MADV_WILLNEED 只是建议；提示字节数不证明磁盘读取、驻留或吞吐提升。attach 汇总的 prefetched 字节数统计的是实际提示过的不同页面，不是提示次数。均匀布局只是合成近似，真实权重需核实字节区间。
 - 随仓引擎 patch 是需要适配的示意参考，不是已验证的即用 llama.cpp 集成。示例不附加在线模型，也不向 GPU 内存搬运数据。
 
 已验证的引擎生产端、准确 GGUF 布局提取与端到端性能实测是下一步集成工作；GPU/锁页内存搬运不在当前链路。
