@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source_revision": "0b15b071d826dfe821cf0f05ea4f35a2d9f99864",
+  "source_revision": "e41cdaf8d9bda1ccb2ef8b34abefecd237f8213d",
   "scope": "Offline predictor evaluation on a generated synthetic router trace, plus one madvise hint on a 16KiB synthetic file. The advised range is page-rounded (madvise works on pages), so the exact hint numbers depend on the host page size — this run is from a 16K-page host. Projected throughput is not measured inference speed.",
   "steps": [
     {
